@@ -34,7 +34,7 @@ all: sim
 sw: $(SW_HEX)
 
 $(SW_ELF): $(SW_SRC)
-	$(RISCV_GCC) -march=rv32imc -mabi=ilp32 -nostartfiles -Ttext=0x0 -o $@ $<
+	$(RISCV_GCC) -march=rv32imc -mabi=ilp32 -nostartfiles -nostdlib -Ttext=0x0 -o $@ $<
 
 $(SW_HEX): $(SW_ELF)
 	$(RISCV_OBJCOPY) -O verilog $< $@

@@ -53,9 +53,7 @@ wire [W_DATA-1:0] d_hrdata;
 // ----------------------------------------------------------------------------
 // Hazard3 CPU
 
-hazard3_cpu_2port #(
-    `include "hazard3_config.vh"
-) cpu (
+hazard3_cpu_2port cpu (
     .clk              (clk),
     .clk_always_on    (clk),
     .rst_n            (rst_n),

@@ -128,7 +128,7 @@ hazard3_cpu_2port cpu (
     .eco_version       (4'h0),
 
     // Interrupts — tied off
-    .irq              (32'h0),
+    .irq              (1'b0),
     .soft_irq         (1'b0),
     .timer_irq        (1'b0)
 );

@@ -16,6 +16,7 @@ VERILATOR_FLAGS = \
 	-Wno-fatal \
 	--public-flat-rw \
 	-I$(HAZARD3_HDL) \
+	-y $(HAZARD3_HDL)/arith \
 	--top-module $(TOP)
 
 SRC_RTL = \

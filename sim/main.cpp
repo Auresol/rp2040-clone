@@ -9,11 +9,36 @@ static const uint32_t SENTINEL_ADDR  = 0x00003ffc;
 static const uint32_t SENTINEL_VALUE = 0xdeadbeef;
 static const int      MAX_CYCLES     = 100000;
 
+static void load_firmware(Vrvsoc_top *dut, const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        fprintf(stderr, "FATAL: cannot open firmware '%s'\n", path);
+        exit(1);
+    }
+    uint8_t buf[4];
+    int idx = 0;
+    while (fread(buf, 1, 4, f) == 4) {
+        // Little-endian byte packing — explicit, no format ambiguity
+        dut->rvsoc_top__DOT__sram[idx++] =
+            (uint32_t)buf[0]        |
+            ((uint32_t)buf[1] << 8) |
+            ((uint32_t)buf[2] << 16)|
+            ((uint32_t)buf[3] << 24);
+    }
+    fclose(f);
+    printf("Loaded %d words from '%s'\n", idx, path);
+    printf("  sram[0] = 0x%08x (expect 0xDEADC537 for lui a0,0xdeadc)\n",
+           dut->rvsoc_top__DOT__sram[0]);
+}
+
 int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
     Verilated::traceEverOn(true);
 
     Vrvsoc_top *dut = new Vrvsoc_top;
+
+    // Load firmware before simulation starts (SRAM is zeroed by constructor)
+    load_firmware(dut, "sim/sw/hello.bin");
 
     VerilatedVcdC *tfp = new VerilatedVcdC;
     dut->trace(tfp, 99);
@@ -33,12 +58,6 @@ int main(int argc, char **argv) {
         dut->clk = 1;
         dut->eval();
         tfp->dump(cycle * 2 + 4);
-
-        // Check sentinel by peeking at the DUT's SRAM array
-        // Verilator exposes sram as a public member when --public is used.
-        // For now we check via the data bus address and read data.
-        // Simple heuristic: watch d_haddr + d_hrdata one cycle after write.
-        // A cleaner approach is done after --public-flat-rw is added to Makefile.
 
         // Falling edge
         dut->clk = 0;

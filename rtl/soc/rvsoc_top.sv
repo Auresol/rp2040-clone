@@ -192,11 +192,6 @@ assign d_hready  = 1'b1;
 assign d_hresp   = 1'b0;
 assign d_hexokay = 1'b0;
 
-// ----------------------------------------------------------------------------
-// SRAM initialisation from hex file (simulation only)
-
-initial begin
-    $readmemh("sim/sw/hello.hex", sram);
-end
+// SRAM is initialised from the testbench (main.cpp) before simulation starts.
 
 endmodule

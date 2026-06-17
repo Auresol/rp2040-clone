@@ -26,23 +26,23 @@ SIM_CPP = $(SIM_DIR)/main.cpp
 
 SW_SRC  = $(SIM_DIR)/sw/hello.S
 SW_ELF  = $(SIM_DIR)/sw/hello.elf
-SW_HEX  = $(SIM_DIR)/sw/hello.hex
+SW_BIN  = $(SIM_DIR)/sw/hello.bin
 
 .PHONY: all sim sw clean
 
 all: sim
 
-sw: $(SW_HEX)
+sw: $(SW_BIN)
 
 $(SW_ELF): $(SW_SRC)
 	$(RISCV_GCC) -march=rv32imc -mabi=ilp32 -nostartfiles -nostdlib -Ttext=0x0 -o $@ $<
 
-$(SW_HEX): $(SW_ELF)
-	$(RISCV_OBJCOPY) -O verilog --verilog-data-width 4 $< $@
+$(SW_BIN): $(SW_ELF)
+	$(RISCV_OBJCOPY) -O binary $< $@
 
 sim: sw
 	$(VERILATOR) $(VERILATOR_FLAGS) $(SRC_RTL) $(SIM_CPP)
 	./obj_dir/V$(TOP)
 
 clean:
-	rm -rf obj_dir $(SW_ELF) $(SW_HEX) dump.vcd
+	rm -rf obj_dir $(SW_ELF) $(SW_BIN) dump.vcd

@@ -178,11 +178,15 @@ end
 reg [W_DATA-1:0] d_hrdata_r;
 
 always @(posedge clk) begin
+    // Blocking assignments update the array immediately within this block,
+    // so the read below sees the new value when write and read target the
+    // same word (write-first semantics). This matches RISC-V's requirement
+    // that a hart's own stores are visible to subsequent loads.
     if (d_active_r && d_hwrite_r) begin
-        if (d_wstrb_r[0]) sram[d_word_addr_r][ 7: 0] <= d_hwdata[ 7: 0];
-        if (d_wstrb_r[1]) sram[d_word_addr_r][15: 8] <= d_hwdata[15: 8];
-        if (d_wstrb_r[2]) sram[d_word_addr_r][23:16] <= d_hwdata[23:16];
-        if (d_wstrb_r[3]) sram[d_word_addr_r][31:24] <= d_hwdata[31:24];
+        if (d_wstrb_r[0]) sram[d_word_addr_r][ 7: 0] = d_hwdata[ 7: 0];
+        if (d_wstrb_r[1]) sram[d_word_addr_r][15: 8] = d_hwdata[15: 8];
+        if (d_wstrb_r[2]) sram[d_word_addr_r][23:16] = d_hwdata[23:16];
+        if (d_wstrb_r[3]) sram[d_word_addr_r][31:24] = d_hwdata[31:24];
     end
     d_hrdata_r <= sram[d_word_addr];
 end

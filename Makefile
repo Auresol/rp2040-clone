@@ -38,7 +38,7 @@ $(SW_ELF): $(SW_SRC)
 	$(RISCV_GCC) -march=rv32imc -mabi=ilp32 -nostartfiles -nostdlib -Ttext=0x0 -o $@ $<
 
 $(SW_HEX): $(SW_ELF)
-	$(RISCV_OBJCOPY) -O verilog $< $@
+	$(RISCV_OBJCOPY) -O verilog --verilog-data-width 4 $< $@
 
 sim: sw
 	$(VERILATOR) $(VERILATOR_FLAGS) $(SRC_RTL) $(SIM_CPP)

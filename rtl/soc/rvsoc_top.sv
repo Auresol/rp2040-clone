@@ -155,19 +155,34 @@ assign i_hresp  = 1'b0;
 wire [13:0] d_word_addr = d_haddr[15:2];
 wire        d_active    = (d_htrans[1] == 1'b1); // NONSEQ or SEQ
 
-reg [W_DATA-1:0] d_hrdata_r;
-
 // Write enables per byte lane
 wire [3:0] d_wstrb = (d_hsize == 3'b000) ? (4'b0001 << d_haddr[1:0]) :
                      (d_hsize == 3'b001) ? (4'b0011 << d_haddr[1:0]) :
                                             4'b1111;
 
+// AHB is pipelined: address phase (haddr/hwrite/htrans) is cycle N,
+// data phase (hwdata) is cycle N+1. Register address-phase signals so
+// they are valid alongside hwdata in the next cycle.
+reg [13:0] d_word_addr_r;
+reg        d_hwrite_r;
+reg        d_active_r;
+reg [3:0]  d_wstrb_r;
+
 always @(posedge clk) begin
-    if (d_active && d_hwrite) begin
-        if (d_wstrb[0]) sram[d_word_addr][ 7: 0] <= d_hwdata[ 7: 0];
-        if (d_wstrb[1]) sram[d_word_addr][15: 8] <= d_hwdata[15: 8];
-        if (d_wstrb[2]) sram[d_word_addr][23:16] <= d_hwdata[23:16];
-        if (d_wstrb[3]) sram[d_word_addr][31:24] <= d_hwdata[31:24];
+    d_word_addr_r <= d_word_addr;
+    d_hwrite_r    <= d_hwrite;
+    d_active_r    <= d_active;
+    d_wstrb_r     <= d_wstrb;
+end
+
+reg [W_DATA-1:0] d_hrdata_r;
+
+always @(posedge clk) begin
+    if (d_active_r && d_hwrite_r) begin
+        if (d_wstrb_r[0]) sram[d_word_addr_r][ 7: 0] <= d_hwdata[ 7: 0];
+        if (d_wstrb_r[1]) sram[d_word_addr_r][15: 8] <= d_hwdata[15: 8];
+        if (d_wstrb_r[2]) sram[d_word_addr_r][23:16] <= d_hwdata[23:16];
+        if (d_wstrb_r[3]) sram[d_word_addr_r][31:24] <= d_hwdata[31:24];
     end
     d_hrdata_r <= sram[d_word_addr];
 end

@@ -29,7 +29,7 @@ GCC_FLAGS = -march=rv32imc -mabi=ilp32 -nostartfiles -nostdlib -Ttext=0x0
 TESTS = hello test_alu test_mem test_branch
 SW_BINS = $(addprefix $(SW_DIR)/, $(addsuffix .bin, $(TESTS)))
 
-.PHONY: all sim test sw clean
+.PHONY: all sim test sw clean remote-test
 
 all: sim
 
@@ -66,3 +66,16 @@ sw: $(SW_BINS)
 
 clean:
 	rm -rf obj_dir $(SW_DIR)/*.elf $(SW_DIR)/*.bin dump.vcd
+
+# Remote test machine
+REMOTE_HOST = pc-nixos
+REMOTE_PATH = /data/rp2040-clone
+
+remote-test:
+	rsync -av --delete \
+		--exclude='.git' \
+		--exclude='obj_dir' \
+		--exclude='$(SW_DIR)/*.elf' \
+		--exclude='$(SW_DIR)/*.bin' \
+		. $(REMOTE_HOST):$(REMOTE_PATH)
+	ssh $(REMOTE_HOST) "cd $(REMOTE_PATH) && make test"

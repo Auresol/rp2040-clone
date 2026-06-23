@@ -1,20 +1,20 @@
-// Dual-core SoC: two Hazard3 cores sharing one 64 KB SRAM.
+// Dual-core SoC with bus fabric.
 //
-// Each core has independent I (fetch) and D (load/store) AHB ports.
-// Two ahb_arbiter instances serialize competing accesses:
-//   i_arb — CPU0-I vs CPU1-I  →  SRAM instruction port
-//   d_arb — CPU0-D vs CPU1-D  →  SRAM data port
+// Instruction port: both CPUs share i_arb → i_dec → SRAM I port.
+// Data port: both CPUs share d_arb → d_dec → SRAM D port or GPIO.
 //
-// CPU0 has priority in both arbiters. CPU1 stalls (hready=0) whenever
-// CPU0 holds the bus.
+// Address map (data port):
+//   0x0000_0000 – 0x0000_FFFF  →  SRAM  (64 KB)
+//   0x4000_0000 – 0x4000_FFFF  →  GPIO  (32-bit output register)
 //
 // Debug and interrupt inputs are tied off — no debugger in this milestone.
 
 `default_nettype none
 
 module rvsoc_top (
-    input wire clk,
-    input wire rst_n
+    input  wire        clk,
+    input  wire        rst_n,
+    output wire [31:0] gpio_out
 );
 
 // ----------------------------------------------------------------------------
@@ -35,7 +35,7 @@ wire [2:0]  cpu0_d_hsize,  cpu0_d_hburst;
 wire [3:0]  cpu0_d_hprot;
 wire        cpu0_d_hmastlock;
 wire [7:0]  cpu0_d_hmaster;
-wire        cpu0_d_hexcl;   // exclusive access — not used, tie off below
+wire        cpu0_d_hexcl;
 
 // ----------------------------------------------------------------------------
 // CPU1 AHB signals
@@ -58,7 +58,7 @@ wire [7:0]  cpu1_d_hmaster;
 wire        cpu1_d_hexcl;
 
 // ----------------------------------------------------------------------------
-// Arbitrated bus signals (arbiter → SRAM)
+// Arbitrated I bus (i_arb → i_dec)
 
 wire [31:0] arb_i_haddr,  arb_i_hwdata,  arb_i_hrdata;
 wire        arb_i_hwrite, arb_i_hready,  arb_i_hresp;
@@ -68,6 +68,16 @@ wire [3:0]  arb_i_hprot;
 wire        arb_i_hmastlock;
 wire [7:0]  arb_i_hmaster;
 
+// ----------------------------------------------------------------------------
+// I decoder → SRAM I port
+
+wire [31:0] dec_isram_haddr,  dec_isram_hrdata;
+wire [1:0]  dec_isram_htrans;
+wire        dec_isram_hready, dec_isram_hresp;
+
+// ----------------------------------------------------------------------------
+// Arbitrated D bus (d_arb → d_dec)
+
 wire [31:0] arb_d_haddr,  arb_d_hwdata,  arb_d_hrdata;
 wire        arb_d_hwrite, arb_d_hready,  arb_d_hresp;
 wire [1:0]  arb_d_htrans;
@@ -75,7 +85,23 @@ wire [2:0]  arb_d_hsize,  arb_d_hburst;
 wire [3:0]  arb_d_hprot;
 wire        arb_d_hmastlock;
 wire [7:0]  arb_d_hmaster;
-wire        arb_d_hexokay;
+
+// ----------------------------------------------------------------------------
+// Decoder → SRAM D port
+
+wire [31:0] dec_sram_haddr,  dec_sram_hwdata,  dec_sram_hrdata;
+wire        dec_sram_hwrite, dec_sram_hready,  dec_sram_hresp;
+wire [1:0]  dec_sram_htrans;
+wire [2:0]  dec_sram_hsize;
+wire        dec_sram_hexokay;
+
+// ----------------------------------------------------------------------------
+// Decoder → GPIO
+
+wire [31:0] dec_gpio_haddr,  dec_gpio_hwdata,  dec_gpio_hrdata;
+wire        dec_gpio_hwrite, dec_gpio_hready,  dec_gpio_hresp;
+wire [1:0]  dec_gpio_htrans;
+wire [2:0]  dec_gpio_hsize;
 
 // ----------------------------------------------------------------------------
 // CPU0 — hart 0
@@ -324,24 +350,113 @@ ahb_arbiter d_arb (
 );
 
 // ----------------------------------------------------------------------------
+// Data-port decoder: routes d_arb output to SRAM or GPIO by address
+
+ahb_decoder d_dec (
+    .clk       (clk),
+    .rst_n     (rst_n),
+
+    .m_haddr   (arb_d_haddr),
+    .m_hwrite  (arb_d_hwrite),
+    .m_htrans  (arb_d_htrans),
+    .m_hsize   (arb_d_hsize),
+    .m_hwdata  (arb_d_hwdata),
+    .m_hrdata  (arb_d_hrdata),
+    .m_hready  (arb_d_hready),
+    .m_hresp   (arb_d_hresp),
+
+    .s0_haddr  (dec_sram_haddr),
+    .s0_hwrite (dec_sram_hwrite),
+    .s0_htrans (dec_sram_htrans),
+    .s0_hsize  (dec_sram_hsize),
+    .s0_hwdata (dec_sram_hwdata),
+    .s0_hrdata (dec_sram_hrdata),
+    .s0_hready (dec_sram_hready),
+    .s0_hresp  (dec_sram_hresp),
+
+    .s1_haddr  (dec_gpio_haddr),
+    .s1_hwrite (dec_gpio_hwrite),
+    .s1_htrans (dec_gpio_htrans),
+    .s1_hsize  (dec_gpio_hsize),
+    .s1_hwdata (dec_gpio_hwdata),
+    .s1_hrdata (dec_gpio_hrdata),
+    .s1_hready (dec_gpio_hready),
+    .s1_hresp  (dec_gpio_hresp)
+);
+
+// ----------------------------------------------------------------------------
+// Instruction-port decoder: routes i_arb output to SRAM I port (s0).
+// s1 is reserved for future fetch targets (e.g. ROM); tied off for now.
+
+ahb_decoder i_dec (
+    .clk       (clk),
+    .rst_n     (rst_n),
+
+    .m_haddr   (arb_i_haddr),
+    .m_hwrite  (arb_i_hwrite),
+    .m_htrans  (arb_i_htrans),
+    .m_hsize   (arb_i_hsize),
+    .m_hwdata  (arb_i_hwdata),
+    .m_hrdata  (arb_i_hrdata),
+    .m_hready  (arb_i_hready),
+    .m_hresp   (arb_i_hresp),
+
+    // s0 → SRAM I port (read-only; hwrite/hsize/hwdata outputs unused)
+    .s0_haddr  (dec_isram_haddr),
+    .s0_hwrite (),
+    .s0_htrans (dec_isram_htrans),
+    .s0_hsize  (),
+    .s0_hwdata (),
+    .s0_hrdata (dec_isram_hrdata),
+    .s0_hready (dec_isram_hready),
+    .s0_hresp  (dec_isram_hresp),
+
+    // s1 → reserved, tied off
+    .s1_haddr  (),
+    .s1_hwrite (),
+    .s1_htrans (),
+    .s1_hsize  (),
+    .s1_hwdata (),
+    .s1_hrdata (32'h0),
+    .s1_hready (1'b1),
+    .s1_hresp  (1'b0)
+);
+
+// ----------------------------------------------------------------------------
 // Shared SRAM (64 KB)
 
 sram_top mem (
     .clk       (clk),
-    .i_haddr   (arb_i_haddr),
-    .i_htrans  (arb_i_htrans),
-    .i_hrdata  (arb_i_hrdata),
-    .i_hready  (arb_i_hready),
-    .i_hresp   (arb_i_hresp),
-    .d_haddr   (arb_d_haddr),
-    .d_hwrite  (arb_d_hwrite),
-    .d_htrans  (arb_d_htrans),
-    .d_hsize   (arb_d_hsize),
-    .d_hwdata  (arb_d_hwdata),
-    .d_hrdata  (arb_d_hrdata),
-    .d_hready  (arb_d_hready),
-    .d_hresp   (arb_d_hresp),
-    .d_hexokay (arb_d_hexokay)
+    .i_haddr   (dec_isram_haddr),
+    .i_htrans  (dec_isram_htrans),
+    .i_hrdata  (dec_isram_hrdata),
+    .i_hready  (dec_isram_hready),
+    .i_hresp   (dec_isram_hresp),
+    .d_haddr   (dec_sram_haddr),
+    .d_hwrite  (dec_sram_hwrite),
+    .d_htrans  (dec_sram_htrans),
+    .d_hsize   (dec_sram_hsize),
+    .d_hwdata  (dec_sram_hwdata),
+    .d_hrdata  (dec_sram_hrdata),
+    .d_hready  (dec_sram_hready),
+    .d_hresp   (dec_sram_hresp),
+    .d_hexokay (dec_sram_hexokay)
+);
+
+// ----------------------------------------------------------------------------
+// GPIO peripheral
+
+gpio gpio0 (
+    .clk      (clk),
+    .rst_n    (rst_n),
+    .haddr    (dec_gpio_haddr),
+    .hwrite   (dec_gpio_hwrite),
+    .htrans   (dec_gpio_htrans),
+    .hwdata   (dec_gpio_hwdata),
+    .hrdata   (dec_gpio_hrdata),
+    .hready   (dec_gpio_hready),
+    .hresp    (dec_gpio_hresp),
+    .gpio_out (gpio_out)
 );
 
 endmodule

@@ -1,11 +1,13 @@
 // Dual-core SoC with bus fabric.
 //
 // Instruction port: both CPUs share i_arb → i_dec → SRAM I port.
-// Data port: both CPUs share d_arb → d_dec → SRAM D port or GPIO.
+// Data port: both CPUs share d_arb → d_dec → SRAM D port, GPIO, PIO0, or PIO1.
 //
 // Address map (data port):
 //   0x0000_0000 – 0x0000_FFFF  →  SRAM  (64 KB)
 //   0x4000_0000 – 0x4000_FFFF  →  GPIO  (32-bit output register)
+//   0x5020_0000 – 0x5020_FFFF  →  PIO0
+//   0x5030_0000 – 0x5030_FFFF  →  PIO1
 //
 // Debug and interrupt inputs are tied off — no debugger in this milestone.
 
@@ -14,7 +16,17 @@
 module rvsoc_top (
     input  wire        clk,
     input  wire        rst_n,
-    output wire [31:0] gpio_out
+
+    // Simple GPIO output (backward-compatible with existing tests)
+    output wire [31:0] gpio_out,
+
+    // PIO GPIO interface
+    input  wire [31:0] pio_gpio_in,
+    output wire [31:0] pio_gpio_out,
+    output wire [31:0] pio_gpio_oe,
+
+    // PIO IRQ outputs: [3:0]=PIO0 IRQs, [7:4]=PIO1 IRQs
+    output wire [7:0]  pio_irq
 );
 
 // ----------------------------------------------------------------------------
@@ -102,6 +114,35 @@ wire [31:0] dec_gpio_haddr,  dec_gpio_hwdata,  dec_gpio_hrdata;
 wire        dec_gpio_hwrite, dec_gpio_hready,  dec_gpio_hresp;
 wire [1:0]  dec_gpio_htrans;
 wire [2:0]  dec_gpio_hsize;
+
+// ----------------------------------------------------------------------------
+// Decoder → PIO0
+
+wire [31:0] dec_pio0_haddr,  dec_pio0_hwdata,  dec_pio0_hrdata;
+wire        dec_pio0_hwrite, dec_pio0_hready,  dec_pio0_hresp;
+wire [1:0]  dec_pio0_htrans;
+wire [2:0]  dec_pio0_hsize;
+
+// ----------------------------------------------------------------------------
+// Decoder → PIO1
+
+wire [31:0] dec_pio1_haddr,  dec_pio1_hwdata,  dec_pio1_hrdata;
+wire        dec_pio1_hwrite, dec_pio1_hready,  dec_pio1_hresp;
+wire [1:0]  dec_pio1_htrans;
+wire [2:0]  dec_pio1_hsize;
+
+// ----------------------------------------------------------------------------
+// PIO GPIO signals (merged from PIO0 and PIO1; PIO1 has higher priority)
+
+wire [31:0] pio0_gpio_out, pio0_gpio_oe;
+wire [31:0] pio1_gpio_out, pio1_gpio_oe;
+wire [3:0]  pio0_irq, pio1_irq;
+
+// Per-bit priority mux: PIO1 overrides PIO0 when PIO1 has OE
+assign pio_gpio_out = (pio1_gpio_oe & pio1_gpio_out) |
+                      (~pio1_gpio_oe & pio0_gpio_oe & pio0_gpio_out);
+assign pio_gpio_oe  = pio0_gpio_oe | pio1_gpio_oe;
+assign pio_irq      = {pio1_irq, pio0_irq};
 
 // ----------------------------------------------------------------------------
 // CPU0 — hart 0
@@ -350,9 +391,9 @@ ahb_arbiter d_arb (
 );
 
 // ----------------------------------------------------------------------------
-// Data-port decoder: routes d_arb output to SRAM or GPIO by address
+// Data-port decoder: routes d_arb output to SRAM, GPIO, PIO0, or PIO1
 
-ahb_decoder d_dec (
+ahb_decoder_4s d_dec (
     .clk       (clk),
     .rst_n     (rst_n),
 
@@ -381,7 +422,25 @@ ahb_decoder d_dec (
     .s1_hwdata (dec_gpio_hwdata),
     .s1_hrdata (dec_gpio_hrdata),
     .s1_hready (dec_gpio_hready),
-    .s1_hresp  (dec_gpio_hresp)
+    .s1_hresp  (dec_gpio_hresp),
+
+    .s2_haddr  (dec_pio0_haddr),
+    .s2_hwrite (dec_pio0_hwrite),
+    .s2_htrans (dec_pio0_htrans),
+    .s2_hsize  (dec_pio0_hsize),
+    .s2_hwdata (dec_pio0_hwdata),
+    .s2_hrdata (dec_pio0_hrdata),
+    .s2_hready (dec_pio0_hready),
+    .s2_hresp  (dec_pio0_hresp),
+
+    .s3_haddr  (dec_pio1_haddr),
+    .s3_hwrite (dec_pio1_hwrite),
+    .s3_htrans (dec_pio1_htrans),
+    .s3_hsize  (dec_pio1_hsize),
+    .s3_hwdata (dec_pio1_hwdata),
+    .s3_hrdata (dec_pio1_hrdata),
+    .s3_hready (dec_pio1_hready),
+    .s3_hresp  (dec_pio1_hresp)
 );
 
 // ----------------------------------------------------------------------------
@@ -457,6 +516,46 @@ gpio gpio0 (
     .hready   (dec_gpio_hready),
     .hresp    (dec_gpio_hresp),
     .gpio_out (gpio_out)
+);
+
+// ----------------------------------------------------------------------------
+// PIO0 (0x5020_0000)
+
+pio_top pio0 (
+    .clk      (clk),
+    .rst_n    (rst_n),
+    .haddr    (dec_pio0_haddr),
+    .hwrite   (dec_pio0_hwrite),
+    .htrans   (dec_pio0_htrans),
+    .hsize    (dec_pio0_hsize),
+    .hwdata   (dec_pio0_hwdata),
+    .hrdata   (dec_pio0_hrdata),
+    .hready   (dec_pio0_hready),
+    .hresp    (dec_pio0_hresp),
+    .gpio_in  (pio_gpio_in),
+    .gpio_out (pio0_gpio_out),
+    .gpio_oe  (pio0_gpio_oe),
+    .irq_out  (pio0_irq)
+);
+
+// ----------------------------------------------------------------------------
+// PIO1 (0x5030_0000)
+
+pio_top pio1 (
+    .clk      (clk),
+    .rst_n    (rst_n),
+    .haddr    (dec_pio1_haddr),
+    .hwrite   (dec_pio1_hwrite),
+    .htrans   (dec_pio1_htrans),
+    .hsize    (dec_pio1_hsize),
+    .hwdata   (dec_pio1_hwdata),
+    .hrdata   (dec_pio1_hrdata),
+    .hready   (dec_pio1_hready),
+    .hresp    (dec_pio1_hresp),
+    .gpio_in  (pio_gpio_in),
+    .gpio_out (pio1_gpio_out),
+    .gpio_oe  (pio1_gpio_oe),
+    .irq_out  (pio1_irq)
 );
 
 endmodule

@@ -43,6 +43,9 @@ int main(int argc, char **argv) {
     dut->trace(tfp, 99);
     tfp->open("dump.vcd");
 
+    // Tie off PIO GPIO inputs (no external GPIO driven in simulation)
+    dut->pio_gpio_in = 0;
+
     // Reset
     dut->rst_n = 0;
     dut->clk   = 0;

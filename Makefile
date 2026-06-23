@@ -21,6 +21,7 @@ VERILATOR_FLAGS = \
 	-y $(RTL_DIR)/soc/fabric \
 	-y $(RTL_DIR)/soc/memory \
 	-y $(RTL_DIR)/soc/peripheral \
+	-y $(RTL_DIR)/soc/peripheral/pio \
 	--top-module $(TOP)
 	
 SRC_RTL  = $(RTL_DIR)/soc/$(TOP).sv
@@ -29,7 +30,7 @@ SIM_BIN  = obj_dir/V$(TOP)
 
 GCC_FLAGS = -march=rv32imc_zicsr -mabi=ilp32 -nostartfiles -nostdlib -Ttext=0x0
 
-TESTS = hello test_alu test_mem test_branch test_gpio
+TESTS = hello test_alu test_mem test_branch test_gpio test_pio
 SW_BINS = $(addprefix $(SW_DIR)/, $(addsuffix .bin, $(TESTS)))
 
 ARB_RTL = $(RTL_DIR)/soc/fabric/ahb_arbiter.sv

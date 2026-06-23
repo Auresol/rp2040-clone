@@ -6,6 +6,9 @@
 .global _start
 
 _start:
+    csrr a0, mhartid
+    bnez a0, hart1_spin      # hart 1 spins — only hart 0 runs the test
+
     # beq — taken
     li   t0, 42
     li   t1, 42
@@ -104,3 +107,6 @@ done:
 
 fail:
     j    fail
+
+hart1_spin:
+    j    hart1_spin

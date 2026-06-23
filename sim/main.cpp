@@ -1,4 +1,7 @@
 #include "Vrvsoc_top.h"
+#include "Vrvsoc_top_rvsoc_top.h"
+#include "Vrvsoc_top_sram_top.h"
+#include "Vrvsoc_top_sram_bank.h"
 #include "verilated.h"
 #include "verilated_vcd_c.h"
 #include <cstdio>
@@ -17,7 +20,7 @@ static void load_firmware(Vrvsoc_top *dut, const char *path) {
     uint8_t buf[4];
     int idx = 0;
     while (fread(buf, 1, 4, f) == 4) {
-        dut->rvsoc_top__DOT__sram[idx++] =
+        dut->rvsoc_top->mem->bank->sram[idx++] =
             (uint32_t)buf[0]         |
             ((uint32_t)buf[1] <<  8) |
             ((uint32_t)buf[2] << 16) |
@@ -53,7 +56,7 @@ int main(int argc, char **argv) {
         dut->clk = 0; dut->eval(); tfp->dump(cycle * 2 + 5);
     }
 
-    uint32_t val = dut->rvsoc_top__DOT__sram[0xfff];
+    uint32_t val = dut->rvsoc_top->mem->bank->sram[0xfff];
     bool pass = (val == SENTINEL_VALUE);
     printf("%s: %s\n", firmware, pass ? "PASS" : "FAIL");
     if (!pass)

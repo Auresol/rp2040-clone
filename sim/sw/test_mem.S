@@ -6,6 +6,9 @@
 .global _start
 
 _start:
+    csrr a0, mhartid
+    bnez a0, hart1_spin      # hart 1 spins — only hart 0 runs the test
+
     li   s0, 0x200          # base of scratch area
 
     # sw / lw round-trip
@@ -74,3 +77,6 @@ done:
 
 fail:
     j    fail
+
+hart1_spin:
+    j    hart1_spin

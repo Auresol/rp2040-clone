@@ -1,6 +1,14 @@
-// Minimal SoC: single Hazard3 core + 64KB SRAM
-// Both I and D ports share the same SRAM (no crossbar yet)
-// Debug signals are tied off — no debugger in this milestone
+// Dual-core SoC: two Hazard3 cores sharing one 64 KB SRAM.
+//
+// Each core has independent I (fetch) and D (load/store) AHB ports.
+// Two ahb_arbiter instances serialize competing accesses:
+//   i_arb — CPU0-I vs CPU1-I  →  SRAM instruction port
+//   d_arb — CPU0-D vs CPU1-D  →  SRAM data port
+//
+// CPU0 has priority in both arbiters. CPU1 stalls (hready=0) whenever
+// CPU0 holds the bus.
+//
+// Debug and interrupt inputs are tied off — no debugger in this milestone.
 
 `default_nettype none
 
@@ -10,97 +18,111 @@ module rvsoc_top (
 );
 
 // ----------------------------------------------------------------------------
-// Parameters
+// CPU0 AHB signals
 
-localparam W_ADDR = 32;
-localparam W_DATA = 32;
-localparam SRAM_DEPTH = 16384; // 64KB (16K x 32-bit words)
-localparam SRAM_BASE  = 32'h0000_0000;
+wire [31:0] cpu0_i_haddr,  cpu0_i_hwdata,  cpu0_i_hrdata;
+wire        cpu0_i_hwrite, cpu0_i_hready,  cpu0_i_hresp;
+wire [1:0]  cpu0_i_htrans;
+wire [2:0]  cpu0_i_hsize,  cpu0_i_hburst;
+wire [3:0]  cpu0_i_hprot;
+wire        cpu0_i_hmastlock;
+wire [7:0]  cpu0_i_hmaster;
 
-// ----------------------------------------------------------------------------
-// AHB signals — instruction port
-
-wire [W_ADDR-1:0] i_haddr;
-wire              i_hwrite;
-wire [1:0]        i_htrans;
-wire [2:0]        i_hsize;
-wire [2:0]        i_hburst;
-wire [3:0]        i_hprot;
-wire              i_hmastlock;
-wire [7:0]        i_hmaster;
-wire              i_hready;
-wire              i_hresp;
-wire [W_DATA-1:0] i_hwdata;
-wire [W_DATA-1:0] i_hrdata;
-
-// AHB signals — data port
-
-wire [W_ADDR-1:0] d_haddr;
-wire              d_hwrite;
-wire [1:0]        d_htrans;
-wire [2:0]        d_hsize;
-wire [2:0]        d_hburst;
-wire [3:0]        d_hprot;
-wire              d_hmastlock;
-wire [7:0]        d_hmaster;
-wire              d_hexcl;
-wire              d_hready;
-wire              d_hresp;
-wire              d_hexokay;
-wire [W_DATA-1:0] d_hwdata;
-wire [W_DATA-1:0] d_hrdata;
+wire [31:0] cpu0_d_haddr,  cpu0_d_hwdata,  cpu0_d_hrdata;
+wire        cpu0_d_hwrite, cpu0_d_hready,  cpu0_d_hresp;
+wire [1:0]  cpu0_d_htrans;
+wire [2:0]  cpu0_d_hsize,  cpu0_d_hburst;
+wire [3:0]  cpu0_d_hprot;
+wire        cpu0_d_hmastlock;
+wire [7:0]  cpu0_d_hmaster;
+wire        cpu0_d_hexcl;   // exclusive access — not used, tie off below
 
 // ----------------------------------------------------------------------------
-// Hazard3 CPU
+// CPU1 AHB signals
 
-hazard3_cpu_2port cpu (
-    .clk              (clk),
-    .clk_always_on    (clk),
-    .rst_n            (rst_n),
+wire [31:0] cpu1_i_haddr,  cpu1_i_hwdata,  cpu1_i_hrdata;
+wire        cpu1_i_hwrite, cpu1_i_hready,  cpu1_i_hresp;
+wire [1:0]  cpu1_i_htrans;
+wire [2:0]  cpu1_i_hsize,  cpu1_i_hburst;
+wire [3:0]  cpu1_i_hprot;
+wire        cpu1_i_hmastlock;
+wire [7:0]  cpu1_i_hmaster;
 
-    // Power — tie off (always on)
-    .pwrup_req        (),
-    .pwrup_ack        (1'b1),
-    .clk_en           (),
-    .unblock_out      (),
-    .unblock_in       (1'b0),
+wire [31:0] cpu1_d_haddr,  cpu1_d_hwdata,  cpu1_d_hrdata;
+wire        cpu1_d_hwrite, cpu1_d_hready,  cpu1_d_hresp;
+wire [1:0]  cpu1_d_htrans;
+wire [2:0]  cpu1_d_hsize,  cpu1_d_hburst;
+wire [3:0]  cpu1_d_hprot;
+wire        cpu1_d_hmastlock;
+wire [7:0]  cpu1_d_hmaster;
+wire        cpu1_d_hexcl;
 
-    // Instruction port
-    .i_haddr          (i_haddr),
-    .i_hwrite         (i_hwrite),
-    .i_htrans         (i_htrans),
-    .i_hsize          (i_hsize),
-    .i_hburst         (i_hburst),
-    .i_hprot          (i_hprot),
-    .i_hmastlock      (i_hmastlock),
-    .i_hmaster        (i_hmaster),
-    .i_hready         (i_hready),
-    .i_hresp          (i_hresp),
-    .i_hwdata         (i_hwdata),
-    .i_hrdata         (i_hrdata),
+// ----------------------------------------------------------------------------
+// Arbitrated bus signals (arbiter → SRAM)
 
-    // Data port
-    .d_haddr          (d_haddr),
-    .d_hwrite         (d_hwrite),
-    .d_htrans         (d_htrans),
-    .d_hsize          (d_hsize),
-    .d_hburst         (d_hburst),
-    .d_hprot          (d_hprot),
-    .d_hmastlock      (d_hmastlock),
-    .d_hmaster        (d_hmaster),
-    .d_hexcl          (d_hexcl),
-    .d_hready         (d_hready),
-    .d_hresp          (d_hresp),
-    .d_hexokay        (d_hexokay),
-    .d_hwdata         (d_hwdata),
-    .d_hrdata         (d_hrdata),
+wire [31:0] arb_i_haddr,  arb_i_hwdata,  arb_i_hrdata;
+wire        arb_i_hwrite, arb_i_hready,  arb_i_hresp;
+wire [1:0]  arb_i_htrans;
+wire [2:0]  arb_i_hsize,  arb_i_hburst;
+wire [3:0]  arb_i_hprot;
+wire        arb_i_hmastlock;
+wire [7:0]  arb_i_hmaster;
 
-    // Memory ordering
-    .fence_i_vld      (),
-    .fence_d_vld      (),
-    .fence_rdy        (1'b1),
+wire [31:0] arb_d_haddr,  arb_d_hwdata,  arb_d_hrdata;
+wire        arb_d_hwrite, arb_d_hready,  arb_d_hresp;
+wire [1:0]  arb_d_htrans;
+wire [2:0]  arb_d_hsize,  arb_d_hburst;
+wire [3:0]  arb_d_hprot;
+wire        arb_d_hmastlock;
+wire [7:0]  arb_d_hmaster;
+wire        arb_d_hexokay;
 
-    // Debug — tied off
+// ----------------------------------------------------------------------------
+// CPU0 — hart 0
+
+hazard3_cpu_2port cpu0 (
+    .clk           (clk),
+    .clk_always_on (clk),
+    .rst_n         (rst_n),
+
+    .pwrup_req     (),
+    .pwrup_ack     (1'b1),
+    .clk_en        (),
+    .unblock_out   (),
+    .unblock_in    (1'b0),
+
+    .i_haddr       (cpu0_i_haddr),
+    .i_hwrite      (cpu0_i_hwrite),
+    .i_htrans      (cpu0_i_htrans),
+    .i_hsize       (cpu0_i_hsize),
+    .i_hburst      (cpu0_i_hburst),
+    .i_hprot       (cpu0_i_hprot),
+    .i_hmastlock   (cpu0_i_hmastlock),
+    .i_hmaster     (cpu0_i_hmaster),
+    .i_hready      (cpu0_i_hready),
+    .i_hresp       (cpu0_i_hresp),
+    .i_hwdata      (cpu0_i_hwdata),
+    .i_hrdata      (cpu0_i_hrdata),
+
+    .d_haddr       (cpu0_d_haddr),
+    .d_hwrite      (cpu0_d_hwrite),
+    .d_htrans      (cpu0_d_htrans),
+    .d_hsize       (cpu0_d_hsize),
+    .d_hburst      (cpu0_d_hburst),
+    .d_hprot       (cpu0_d_hprot),
+    .d_hmastlock   (cpu0_d_hmastlock),
+    .d_hmaster     (cpu0_d_hmaster),
+    .d_hexcl       (cpu0_d_hexcl),
+    .d_hready      (cpu0_d_hready),
+    .d_hresp       (cpu0_d_hresp),
+    .d_hexokay     (1'b0),
+    .d_hwdata      (cpu0_d_hwdata),
+    .d_hrdata      (cpu0_d_hrdata),
+
+    .fence_i_vld   (),
+    .fence_d_vld   (),
+    .fence_rdy     (1'b1),
+
     .dbg_req_halt          (1'b0),
     .dbg_req_halt_on_reset (1'b0),
     .dbg_req_resume        (1'b0),
@@ -123,79 +145,203 @@ hazard3_cpu_2port cpu (
     .dbg_sbus_wdata        (32'h0),
     .dbg_sbus_rdata        (),
 
-    // Hart ID
-    .mhartid_val      (32'h0),
-    .eco_version       (4'h0),
+    .mhartid_val   (32'h0),
+    .eco_version    (4'h0),
 
-    // Interrupts — tied off
-    .irq              (1'b0),
-    .soft_irq         (1'b0),
-    .timer_irq        (1'b0)
+    .irq           (1'b0),
+    .soft_irq      (1'b0),
+    .timer_irq     (1'b0)
 );
 
 // ----------------------------------------------------------------------------
-// Shared SRAM
-// Both I and D ports get their own read data; D port wins on write conflict.
-// Simple priority: D port has write access; I port is read-only.
+// CPU1 — hart 1
 
-reg [W_DATA-1:0] sram [0:SRAM_DEPTH-1];
+hazard3_cpu_2port cpu1 (
+    .clk           (clk),
+    .clk_always_on (clk),
+    .rst_n         (rst_n),
 
-// Instruction port — read only, 1-cycle latency
-wire [13:0] i_word_addr = i_haddr[15:2];
-reg  [W_DATA-1:0] i_hrdata_r;
+    .pwrup_req     (),
+    .pwrup_ack     (1'b1),
+    .clk_en        (),
+    .unblock_out   (),
+    .unblock_in    (1'b0),
 
-always @(posedge clk)
-    i_hrdata_r <= sram[i_word_addr];
+    .i_haddr       (cpu1_i_haddr),
+    .i_hwrite      (cpu1_i_hwrite),
+    .i_htrans      (cpu1_i_htrans),
+    .i_hsize       (cpu1_i_hsize),
+    .i_hburst      (cpu1_i_hburst),
+    .i_hprot       (cpu1_i_hprot),
+    .i_hmastlock   (cpu1_i_hmastlock),
+    .i_hmaster     (cpu1_i_hmaster),
+    .i_hready      (cpu1_i_hready),
+    .i_hresp       (cpu1_i_hresp),
+    .i_hwdata      (cpu1_i_hwdata),
+    .i_hrdata      (cpu1_i_hrdata),
 
-assign i_hrdata = i_hrdata_r;
-assign i_hready = 1'b1;
-assign i_hresp  = 1'b0;
+    .d_haddr       (cpu1_d_haddr),
+    .d_hwrite      (cpu1_d_hwrite),
+    .d_htrans      (cpu1_d_htrans),
+    .d_hsize       (cpu1_d_hsize),
+    .d_hburst      (cpu1_d_hburst),
+    .d_hprot       (cpu1_d_hprot),
+    .d_hmastlock   (cpu1_d_hmastlock),
+    .d_hmaster     (cpu1_d_hmaster),
+    .d_hexcl       (cpu1_d_hexcl),
+    .d_hready      (cpu1_d_hready),
+    .d_hresp       (cpu1_d_hresp),
+    .d_hexokay     (1'b0),
+    .d_hwdata      (cpu1_d_hwdata),
+    .d_hrdata      (cpu1_d_hrdata),
 
-// Data port — read/write, 1-cycle latency
-wire [13:0] d_word_addr = d_haddr[15:2];
-wire        d_active    = (d_htrans[1] == 1'b1); // NONSEQ or SEQ
+    .fence_i_vld   (),
+    .fence_d_vld   (),
+    .fence_rdy     (1'b1),
 
-// Write enables per byte lane
-wire [3:0] d_wstrb = (d_hsize == 3'b000) ? (4'b0001 << d_haddr[1:0]) :
-                     (d_hsize == 3'b001) ? (4'b0011 << d_haddr[1:0]) :
-                                            4'b1111;
+    .dbg_req_halt          (1'b0),
+    .dbg_req_halt_on_reset (1'b0),
+    .dbg_req_resume        (1'b0),
+    .dbg_halted            (),
+    .dbg_running           (),
+    .dbg_data0_rdata       (32'h0),
+    .dbg_data0_wdata       (),
+    .dbg_data0_wen         (),
+    .dbg_instr_data        (32'h0),
+    .dbg_instr_data_vld    (1'b0),
+    .dbg_instr_data_rdy    (),
+    .dbg_instr_caught_exception (),
+    .dbg_instr_caught_ebreak    (),
+    .dbg_sbus_addr         (32'h0),
+    .dbg_sbus_write        (1'b0),
+    .dbg_sbus_size         (2'h0),
+    .dbg_sbus_vld          (1'b0),
+    .dbg_sbus_rdy          (),
+    .dbg_sbus_err          (),
+    .dbg_sbus_wdata        (32'h0),
+    .dbg_sbus_rdata        (),
 
-// AHB is pipelined: address phase (haddr/hwrite/htrans) is cycle N,
-// data phase (hwdata) is cycle N+1. Register address-phase signals so
-// they are valid alongside hwdata in the next cycle.
-reg [13:0] d_word_addr_r;
-reg        d_hwrite_r;
-reg        d_active_r;
-reg [3:0]  d_wstrb_r;
+    .mhartid_val   (32'h1),
+    .eco_version    (4'h0),
 
-always @(posedge clk) begin
-    d_word_addr_r <= d_word_addr;
-    d_hwrite_r    <= d_hwrite;
-    d_active_r    <= d_active;
-    d_wstrb_r     <= d_wstrb;
-end
+    .irq           (1'b0),
+    .soft_irq      (1'b0),
+    .timer_irq     (1'b0)
+);
 
-reg [W_DATA-1:0] d_hrdata_r;
+// ----------------------------------------------------------------------------
+// Instruction-port arbiter: CPU0-I (M0, priority) vs CPU1-I (M1)
 
-always @(posedge clk) begin
-    // Blocking assignments update the array immediately within this block,
-    // so the read below sees the new value when write and read target the
-    // same word (write-first semantics). This matches RISC-V's requirement
-    // that a hart's own stores are visible to subsequent loads.
-    if (d_active_r && d_hwrite_r) begin
-        if (d_wstrb_r[0]) sram[d_word_addr_r][ 7: 0] = d_hwdata[ 7: 0];
-        if (d_wstrb_r[1]) sram[d_word_addr_r][15: 8] = d_hwdata[15: 8];
-        if (d_wstrb_r[2]) sram[d_word_addr_r][23:16] = d_hwdata[23:16];
-        if (d_wstrb_r[3]) sram[d_word_addr_r][31:24] = d_hwdata[31:24];
-    end
-    d_hrdata_r <= sram[d_word_addr];
-end
+ahb_arbiter i_arb (
+    .clk          (clk),
+    .rst_n        (rst_n),
 
-assign d_hrdata  = d_hrdata_r;
-assign d_hready  = 1'b1;
-assign d_hresp   = 1'b0;
-assign d_hexokay = 1'b0;
+    .m0_haddr     (cpu0_i_haddr),
+    .m0_hwrite    (cpu0_i_hwrite),
+    .m0_htrans    (cpu0_i_htrans),
+    .m0_hsize     (cpu0_i_hsize),
+    .m0_hburst    (cpu0_i_hburst),
+    .m0_hprot     (cpu0_i_hprot),
+    .m0_hmastlock (cpu0_i_hmastlock),
+    .m0_hmaster   (cpu0_i_hmaster),
+    .m0_hwdata    (cpu0_i_hwdata),
+    .m0_hrdata    (cpu0_i_hrdata),
+    .m0_hready    (cpu0_i_hready),
+    .m0_hresp     (cpu0_i_hresp),
 
-// SRAM is initialised from the testbench (main.cpp) before simulation starts.
+    .m1_haddr     (cpu1_i_haddr),
+    .m1_hwrite    (cpu1_i_hwrite),
+    .m1_htrans    (cpu1_i_htrans),
+    .m1_hsize     (cpu1_i_hsize),
+    .m1_hburst    (cpu1_i_hburst),
+    .m1_hprot     (cpu1_i_hprot),
+    .m1_hmastlock (cpu1_i_hmastlock),
+    .m1_hmaster   (cpu1_i_hmaster),
+    .m1_hwdata    (cpu1_i_hwdata),
+    .m1_hrdata    (cpu1_i_hrdata),
+    .m1_hready    (cpu1_i_hready),
+    .m1_hresp     (cpu1_i_hresp),
+
+    .s_haddr      (arb_i_haddr),
+    .s_hwrite     (arb_i_hwrite),
+    .s_htrans     (arb_i_htrans),
+    .s_hsize      (arb_i_hsize),
+    .s_hburst     (arb_i_hburst),
+    .s_hprot      (arb_i_hprot),
+    .s_hmastlock  (arb_i_hmastlock),
+    .s_hmaster    (arb_i_hmaster),
+    .s_hwdata     (arb_i_hwdata),
+    .s_hrdata     (arb_i_hrdata),
+    .s_hready     (arb_i_hready),
+    .s_hresp      (arb_i_hresp)
+);
+
+// ----------------------------------------------------------------------------
+// Data-port arbiter: CPU0-D (M0, priority) vs CPU1-D (M1)
+
+ahb_arbiter d_arb (
+    .clk          (clk),
+    .rst_n        (rst_n),
+
+    .m0_haddr     (cpu0_d_haddr),
+    .m0_hwrite    (cpu0_d_hwrite),
+    .m0_htrans    (cpu0_d_htrans),
+    .m0_hsize     (cpu0_d_hsize),
+    .m0_hburst    (cpu0_d_hburst),
+    .m0_hprot     (cpu0_d_hprot),
+    .m0_hmastlock (cpu0_d_hmastlock),
+    .m0_hmaster   (cpu0_d_hmaster),
+    .m0_hwdata    (cpu0_d_hwdata),
+    .m0_hrdata    (cpu0_d_hrdata),
+    .m0_hready    (cpu0_d_hready),
+    .m0_hresp     (cpu0_d_hresp),
+
+    .m1_haddr     (cpu1_d_haddr),
+    .m1_hwrite    (cpu1_d_hwrite),
+    .m1_htrans    (cpu1_d_htrans),
+    .m1_hsize     (cpu1_d_hsize),
+    .m1_hburst    (cpu1_d_hburst),
+    .m1_hprot     (cpu1_d_hprot),
+    .m1_hmastlock (cpu1_d_hmastlock),
+    .m1_hmaster   (cpu1_d_hmaster),
+    .m1_hwdata    (cpu1_d_hwdata),
+    .m1_hrdata    (cpu1_d_hrdata),
+    .m1_hready    (cpu1_d_hready),
+    .m1_hresp     (cpu1_d_hresp),
+
+    .s_haddr      (arb_d_haddr),
+    .s_hwrite     (arb_d_hwrite),
+    .s_htrans     (arb_d_htrans),
+    .s_hsize      (arb_d_hsize),
+    .s_hburst     (arb_d_hburst),
+    .s_hprot      (arb_d_hprot),
+    .s_hmastlock  (arb_d_hmastlock),
+    .s_hmaster    (arb_d_hmaster),
+    .s_hwdata     (arb_d_hwdata),
+    .s_hrdata     (arb_d_hrdata),
+    .s_hready     (arb_d_hready),
+    .s_hresp      (arb_d_hresp)
+);
+
+// ----------------------------------------------------------------------------
+// Shared SRAM (64 KB)
+
+sram_top mem (
+    .clk       (clk),
+    .i_haddr   (arb_i_haddr),
+    .i_htrans  (arb_i_htrans),
+    .i_hrdata  (arb_i_hrdata),
+    .i_hready  (arb_i_hready),
+    .i_hresp   (arb_i_hresp),
+    .d_haddr   (arb_d_haddr),
+    .d_hwrite  (arb_d_hwrite),
+    .d_htrans  (arb_d_htrans),
+    .d_hsize   (arb_d_hsize),
+    .d_hwdata  (arb_d_hwdata),
+    .d_hrdata  (arb_d_hrdata),
+    .d_hready  (arb_d_hready),
+    .d_hresp   (arb_d_hresp),
+    .d_hexokay (arb_d_hexokay)
+);
 
 endmodule

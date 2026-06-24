@@ -47,7 +47,7 @@ $(SW_DIR)/%.bin: $(FW_DIR)/%.c $(FW_DIR)/crt0.S $(FW_DIR)/link.ld $(FW_DIR)/soc.
 	$(RISCV_OBJCOPY) -O binary $(SW_DIR)/$*.elf $(SW_DIR)/$*.bin
 	rm -f $(SW_DIR)/$*.elf
 
-TESTS = hello test_alu test_mem test_branch test_gpio test_pio gpio_on
+TESTS = hello test_alu test_mem test_branch test_gpio test_pio gpio_on test_uart
 SW_BINS = $(addprefix $(SW_DIR)/, $(addsuffix .bin, $(TESTS)))
 
 ARB_RTL = $(RTL_DIR)/soc/fabric/ahb_arbiter.sv

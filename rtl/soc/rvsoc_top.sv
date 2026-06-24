@@ -1,11 +1,12 @@
 // Single-core SoC with bus fabric.
 //
 // Instruction port: CPU0-I → i_dec → SRAM I port.
-// Data port:        CPU0-D → d_dec → SRAM D port, GPIO, PIO0, or PIO1.
+// Data port:        CPU0-D → d_dec → SRAM D port, GPIO, PIO0, PIO1, or UART0.
 //
 // Address map (data port):
-//   0x0000_0000 – 0x0000_FFFF  →  SRAM  (64 KB)
-//   0x4000_0000 – 0x4000_FFFF  →  GPIO  (32-bit output register)
+//   0x0000_0000 – 0x0000_FFFF  →  SRAM   (64 KB)
+//   0x4000_0000 – 0x4000_FFFF  →  GPIO   (32-bit output register)
+//   0x4003_0000 – 0x4003_FFFF  →  UART0  (base 0x4003_4000, PL011-compatible)
 //   0x5020_0000 – 0x5020_FFFF  →  PIO0
 //   0x5030_0000 – 0x5030_FFFF  →  PIO1
 //
@@ -27,7 +28,11 @@ module rvsoc_top (
     output wire [31:0] pio_gpio_oe,
 
     // PIO IRQ outputs: [3:0]=PIO0 IRQs, [7:4]=PIO1 IRQs
-    output wire [7:0]  pio_irq
+    output wire [7:0]  pio_irq,
+
+    // UART0
+    output wire        uart_tx,
+    input  wire        uart_rx
 );
 
 // ----------------------------------------------------------------------------
@@ -89,6 +94,14 @@ wire [31:0] dec_pio1_haddr,  dec_pio1_hwdata,  dec_pio1_hrdata;
 wire        dec_pio1_hwrite, dec_pio1_hready,  dec_pio1_hresp;
 wire [1:0]  dec_pio1_htrans;
 wire [2:0]  dec_pio1_hsize;
+
+// ----------------------------------------------------------------------------
+// Decoder → UART0
+
+wire [31:0] dec_uart0_haddr,  dec_uart0_hwdata,  dec_uart0_hrdata;
+wire        dec_uart0_hwrite, dec_uart0_hready,  dec_uart0_hresp;
+wire [1:0]  dec_uart0_htrans;
+wire [2:0]  dec_uart0_hsize;
 
 // ----------------------------------------------------------------------------
 // PIO GPIO signals (merged from PIO0 and PIO1; PIO1 has higher priority)
@@ -180,9 +193,9 @@ hazard3_cpu_2port cpu0 (
 );
 
 // ----------------------------------------------------------------------------
-// Data-port decoder: routes CPU0-D directly to SRAM, GPIO, PIO0, or PIO1
+// Data-port decoder: routes CPU0-D directly to SRAM, GPIO, PIO0, PIO1, or UART0
 
-ahb_decoder_4s d_dec (
+ahb_decoder_5s d_dec (
     .clk       (clk),
     .rst_n     (rst_n),
 
@@ -229,7 +242,16 @@ ahb_decoder_4s d_dec (
     .s3_hwdata (dec_pio1_hwdata),
     .s3_hrdata (dec_pio1_hrdata),
     .s3_hready (dec_pio1_hready),
-    .s3_hresp  (dec_pio1_hresp)
+    .s3_hresp  (dec_pio1_hresp),
+
+    .s4_haddr  (dec_uart0_haddr),
+    .s4_hwrite (dec_uart0_hwrite),
+    .s4_htrans (dec_uart0_htrans),
+    .s4_hsize  (dec_uart0_hsize),
+    .s4_hwdata (dec_uart0_hwdata),
+    .s4_hrdata (dec_uart0_hrdata),
+    .s4_hready (dec_uart0_hready),
+    .s4_hresp  (dec_uart0_hresp)
 );
 
 // ----------------------------------------------------------------------------
@@ -345,6 +367,24 @@ pio_top pio1 (
     .gpio_out (pio1_gpio_out),
     .gpio_oe  (pio1_gpio_oe),
     .irq_out  (pio1_irq)
+);
+
+// ----------------------------------------------------------------------------
+// UART0 (base 0x4003_4000)
+
+uart uart0 (
+    .clk      (clk),
+    .rst_n    (rst_n),
+    .haddr    (dec_uart0_haddr),
+    .hwrite   (dec_uart0_hwrite),
+    .htrans   (dec_uart0_htrans),
+    .hsize    (dec_uart0_hsize),
+    .hwdata   (dec_uart0_hwdata),
+    .hrdata   (dec_uart0_hrdata),
+    .hready   (dec_uart0_hready),
+    .hresp    (dec_uart0_hresp),
+    .uart_tx  (uart_tx),
+    .uart_rx  (uart_rx)
 );
 
 endmodule

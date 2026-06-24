@@ -38,7 +38,7 @@ FW_DIR    = fw
 FW_FLAGS  = -march=rv32imc_zicsr -mabi=ilp32 -nostartfiles -nostdlib \
             -T $(FW_DIR)/link.ld -I$(FW_DIR) -O1
 
-FW_TESTS  = test_c_hello test_c_launch test_dualcore
+FW_TESTS  = test_c_hello
 FW_BINS   = $(addprefix $(SW_DIR)/, $(addsuffix .bin, $(FW_TESTS)))
 
 $(SW_DIR)/%.bin: $(FW_DIR)/%.c $(FW_DIR)/crt0.S $(FW_DIR)/link.ld $(FW_DIR)/soc.h

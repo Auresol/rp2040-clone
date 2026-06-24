@@ -46,6 +46,9 @@ int main(int argc, char **argv) {
     // Tie off PIO GPIO inputs (no external GPIO driven in simulation)
     dut->pio_gpio_in = 0;
 
+    // UART RX idle-high (no incoming data in simulation)
+    dut->uart_rx = 1;
+
     // Reset
     dut->rst_n = 0;
     dut->clk   = 0;

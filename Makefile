@@ -30,7 +30,7 @@ SIM_BIN  = obj_dir/V$(TOP)
 
 GCC_FLAGS = -march=rv32imc_zicsr -mabi=ilp32 -nostartfiles -nostdlib -Ttext=0x0
 
-TESTS = hello test_alu test_mem test_branch test_gpio test_pio
+TESTS = hello test_alu test_mem test_branch test_gpio test_pio test_uart
 SW_BINS = $(addprefix $(SW_DIR)/, $(addsuffix .bin, $(TESTS)))
 
 ARB_RTL = $(RTL_DIR)/soc/fabric/ahb_arbiter.sv

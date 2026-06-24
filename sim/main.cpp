@@ -9,7 +9,7 @@
 
 static const uint32_t SENTINEL_ADDR  = 0x00003ffc;
 static const uint32_t SENTINEL_VALUE = 0xdeadbeef;
-static const int      MAX_CYCLES     = 100000;
+static const int      MAX_CYCLES     = 2000;
 
 static void load_firmware(Vrvsoc_top *dut, const char *path) {
     FILE *f = fopen(path, "rb");
@@ -31,6 +31,7 @@ static void load_firmware(Vrvsoc_top *dut, const char *path) {
 
 int main(int argc, char **argv) {
     const char *firmware = argc > 1 ? argv[1] : "sim/sw/hello.bin";
+    const char *vcd_path = argc > 2 ? argv[2] : "dump.vcd";
 
     Verilated::commandArgs(argc, argv);
     Verilated::traceEverOn(true);
@@ -41,7 +42,7 @@ int main(int argc, char **argv) {
 
     VerilatedVcdC *tfp = new VerilatedVcdC;
     dut->trace(tfp, 99);
-    tfp->open("dump.vcd");
+    tfp->open(vcd_path);
 
     // Tie off PIO GPIO inputs (no external GPIO driven in simulation)
     dut->pio_gpio_in = 0;

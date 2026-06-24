@@ -28,7 +28,23 @@ SRC_RTL  = $(RTL_DIR)/soc/$(TOP).sv
 SIM_CPP  = $(SIM_DIR)/main.cpp
 SIM_BIN  = obj_dir/V$(TOP)
 
+# All SystemVerilog sources — simulator rebuilds when any .sv changes.
+RTL_SRCS = $(shell find $(RTL_DIR) -name "*.sv")
+
 GCC_FLAGS = -march=rv32imc_zicsr -mabi=ilp32 -nostartfiles -nostdlib -Ttext=0x0
+
+# C firmware (uses crt0.S + link.ld instead of raw -Ttext=0x0)
+FW_DIR    = fw
+FW_FLAGS  = -march=rv32imc_zicsr -mabi=ilp32 -nostartfiles -nostdlib \
+            -T $(FW_DIR)/link.ld -I$(FW_DIR) -O1
+
+FW_TESTS  = test_c_hello test_c_launch test_dualcore
+FW_BINS   = $(addprefix $(SW_DIR)/, $(addsuffix .bin, $(FW_TESTS)))
+
+$(SW_DIR)/%.bin: $(FW_DIR)/%.c $(FW_DIR)/crt0.S $(FW_DIR)/link.ld $(FW_DIR)/soc.h
+	$(RISCV_GCC) $(FW_FLAGS) -o $(SW_DIR)/$*.elf $(FW_DIR)/crt0.S $<
+	$(RISCV_OBJCOPY) -O binary $(SW_DIR)/$*.elf $(SW_DIR)/$*.bin
+	rm -f $(SW_DIR)/$*.elf
 
 TESTS = hello test_alu test_mem test_branch test_gpio test_pio
 SW_BINS = $(addprefix $(SW_DIR)/, $(addsuffix .bin, $(TESTS)))
@@ -57,12 +73,16 @@ $(DEC_BIN): $(DEC_RTL) $(SIM_DIR)/tb_decoder.cpp
 test-decoder: $(DEC_BIN)
 	./$(DEC_BIN)
 
-.PHONY: all sim test sw clean remote-test test-arbiter test-decoder
+.PHONY: all sim test sw clean remote-test remote-hello test-arbiter test-decoder hello
 
 all: sim
 
-# Build the simulator (only recompiles if RTL or C++ changes)
-$(SIM_BIN): $(SRC_RTL) $(SIM_CPP)
+hello: $(SIM_BIN) $(SW_DIR)/hello.bin
+	mkdir -p $(SW_DIR)/waveform
+	./$(SIM_BIN) $(SW_DIR)/hello.bin $(SW_DIR)/waveform/hello.vcd
+
+# Build the simulator (recompiles when any .sv or the sim driver changes)
+$(SIM_BIN): $(RTL_SRCS) $(SIM_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS) $(SRC_RTL) $(SIM_CPP)
 
 # Generic rules: .S -> .elf -> .bin
@@ -74,13 +94,13 @@ $(SW_DIR)/%.bin: $(SW_DIR)/%.elf
 
 # Run just the sentinel smoke test
 sim: $(SIM_BIN) $(SW_DIR)/hello.bin
-	./$(SIM_BIN) $(SW_DIR)/hello.bin
+	./$(SIM_BIN) $(SW_DIR)/hello.bin $(SW_DIR)/waveform/hello.vcd
 
-# Run all tests
-test: $(SIM_BIN) $(SW_BINS)
+# Run all tests (asm + C firmware)
+test: $(SIM_BIN) $(SW_BINS) $(FW_BINS)
 	@passed=0; failed=0; \
-	for t in $(TESTS); do \
-		if ./$(SIM_BIN) $(SW_DIR)/$$t.bin; then \
+	for t in $(TESTS) $(FW_TESTS); do \
+		if ./$(SIM_BIN) $(SW_DIR)/$$t.bin $(SW_DIR)/waveform/$$t.vcd; then \
 			passed=$$((passed+1)); \
 		else \
 			failed=$$((failed+1)); \
@@ -93,7 +113,7 @@ test: $(SIM_BIN) $(SW_BINS)
 sw: $(SW_BINS)
 
 clean:
-	rm -rf obj_dir $(SW_DIR)/*.elf $(SW_DIR)/*.bin dump.vcd
+	rm -rf obj_dir $(SW_DIR)/*.elf $(SW_DIR)/*.bin $(SW_DIR)/*.vcd
 
 # Remote test machine
 REMOTE_HOST = pc-nixos
@@ -105,5 +125,22 @@ remote-test:
 		--exclude='obj_dir' \
 		--exclude='$(SW_DIR)/*.elf' \
 		--exclude='$(SW_DIR)/*.bin' \
+		--exclude='$(SW_DIR)/waveform/*.vcd' \
 		. $(REMOTE_HOST):$(REMOTE_PATH)
 	ssh $(REMOTE_HOST) "cd $(REMOTE_PATH); env VERILATOR_ROOT=(verilator --getenv VERILATOR_ROOT) RISCV_GCC=(which riscv64-none-elf-gcc | get path | first) RISCV_OBJCOPY=(which riscv64-none-elf-objcopy | get path | first) make test"
+
+remote-hello:
+	rsync -av --delete \
+		--exclude='.git' \
+		--exclude='obj_dir' \
+		--exclude='$(SW_DIR)/*.elf' \
+		--exclude='$(SW_DIR)/*.bin' \
+		--exclude='$(SW_DIR)/waveform' \
+		. $(REMOTE_HOST):$(REMOTE_PATH)
+	ssh $(REMOTE_HOST) "cd $(REMOTE_PATH); \
+		mkdir $(SW_DIR)/waveform; \
+		env VERILATOR_ROOT=(verilator --getenv VERILATOR_ROOT) RISCV_GCC=(which riscv64-none-elf-gcc | get path | first) RISCV_OBJCOPY=(which riscv64-none-elf-objcopy | get path | first) make hello; \
+		vcd2fst $(SW_DIR)/waveform/hello.vcd $(SW_DIR)/waveform/compress_hello.fst"
+	mkdir $(SW_DIR)/waveform
+	scp $(REMOTE_HOST):$(REMOTE_PATH)/$(SW_DIR)/waveform/compress_hello.fst \
+		$(SW_DIR)/waveform/compress_hello.fst

@@ -1,9 +1,16 @@
 // 2-master, 1-slave AHB-Lite arbiter.
-// Master 0 has fixed priority over Master 1.
 //
-// Grant is combinational when the bus is idle (avoids a 1-cycle gap when
-// switching masters). Once a transaction is in-flight (busy=1), the grant
-// is held by the registered value so the address+data pipeline stays stable.
+// Arbitration policy:
+//   - Only one master requesting: that master wins immediately.
+//   - Both masters requesting (contested): round-robin — each master gets
+//     one transaction, then the other gets a turn.
+//   - Back-to-back: allowed only when the other master is NOT also requesting.
+//     The moment the other master starts requesting, the current master gives
+//     up the bus after completing its current transaction.
+//
+// This ensures neither master can starve the other.  M0 wins the very first
+// contested cycle after reset (last_winner initialises to M1), giving Core 0
+// a natural "first mover" advantage for single-core workloads.
 //
 // Non-granted master sees hready=0 (stalled). AHB spec requires the master
 // to hold its address-phase signals stable while stalled, so when it finally
@@ -15,7 +22,7 @@ module ahb_arbiter (
     input  wire        clk,
     input  wire        rst_n,
 
-    // Master 0 (higher priority)
+    // Master 0 (wins first contested cycle after reset)
     input  wire [31:0] m0_haddr,
     input  wire        m0_hwrite,
     input  wire [1:0]  m0_htrans,
@@ -62,30 +69,55 @@ wire m0_req = m0_htrans[1];  // NONSEQ or SEQ = real transaction
 wire m1_req = m1_htrans[1];
 
 // Registered state
-reg grant;  // 0 = M0 holds bus, 1 = M1 holds bus
-reg busy;   // 1 = address phase sent, data phase not yet complete
+reg grant;        // 0 = M0 holds bus, 1 = M1 holds bus
+reg busy;         // 1 = address phase sent, data phase not yet complete
+reg last_winner;  // who won the last contested arbitration (0=M0, 1=M1)
+                  // initialised to 1 so M0 wins the very first contested cycle
 
-// Combinational grant:
-//   - When not busy: M0 wins if requesting, else M1 if requesting.
-//   - When busy: hold the registered grant so the in-flight transaction
-//     isn't interrupted.
-wire arb_grant = busy ? grant : (~m0_req & m1_req);
+// Both masters requesting at the same time.
+wire contested = m0_req & m1_req;
 
-// Requesting signal of whichever master currently has the grant.
-// Used to detect back-to-back transactions (master keeps the bus).
+// Combinational grant (who grant the privilede):
+//   - When busy: hold the current registered grant (pipeline must stay stable).
+//   - When idle, only M0 requesting: M0 wins.
+//   - When idle, only M1 requesting: M1 wins.
+//   - When idle, both requesting: give the bus to the other master (round-robin).
+wire arb_grant = busy       ? grant
+               : contested  ? ~last_winner
+               : m1_req     ? 1'b1
+               : 1'b0;
+
+// Current master's next-cycle request (used for back-to-back detection).
 wire cur_req = arb_grant ? m1_req : m0_req;
+
+// Is the non-granted master also requesting?
+// If so, the current master must yield after this transaction (no back-to-back).
+wire other_waiting = arb_grant ? m0_req : m1_req;
+
+// Back-to-back is allowed only when there is no contention.
+wire allow_bbtb = cur_req && !other_waiting;
 
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-        grant <= 1'b0;
-        busy  <= 1'b0;
+        grant       <= 1'b0;
+        busy        <= 1'b0;
+        last_winner <= 1'b1;  // M0 wins first contested cycle (~1 = 0)
     end else begin
         grant <= arb_grant;
+
+        // Record the outcome of any contested arbitration decision so that
+        // the NEXT contested cycle goes to the other master.
+        // Update on: (a) a new contested idle grant, or
+        //            (b) end of a transaction while the other master is waiting.
+        if ((!busy && contested) ||
+            (busy && s_hready && other_waiting))
+            last_winner <= arb_grant;
+
         if (busy) begin
             if (s_hready)
-                // Data phase done. Stay busy only if the current master
-                // already has the next address phase on the wire (back-to-back).
-                busy <= cur_req;
+                // Data phase done.  Keep the bus only if current master has
+                // more work AND the other master is not waiting.
+                busy <= allow_bbtb;
         end else begin
             // Bus idle — go busy as soon as any master requests.
             busy <= m0_req | m1_req;

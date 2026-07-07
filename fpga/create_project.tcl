@@ -1,0 +1,60 @@
+# create_project.tcl — creates Vivado project for rvsoc_top on Basys3
+# Usage: vivado -mode batch -source fpga/create_project.tcl
+# Run from repo root: /data/rp2040-clone
+
+set REPO_ROOT [pwd]
+set PROJECT_NAME rvsoc_basys3
+set PROJECT_DIR $REPO_ROOT/fpga/vivado
+
+# Create project
+create_project $PROJECT_NAME $PROJECT_DIR -part xc7a35tcpg236-1 -force
+
+# -----------------------------------------------------------------------
+# RTL sources
+
+read_verilog -sv [glob $REPO_ROOT/rtl/soc/*.sv]
+read_verilog -sv [glob $REPO_ROOT/rtl/soc/fabric/*.sv]
+read_verilog -sv [glob $REPO_ROOT/rtl/soc/memory/*.sv]
+read_verilog -sv [glob $REPO_ROOT/rtl/soc/peripheral/*.sv]
+read_verilog -sv [glob $REPO_ROOT/rtl/soc/peripheral/pio/*.sv]
+
+# Hazard3 core (plain Verilog)
+read_verilog [glob $REPO_ROOT/rtl/core/hazard3/hdl/*.v]
+read_verilog [glob $REPO_ROOT/rtl/core/hazard3/hdl/arith/*.v]
+
+# FPGA top wrapper
+read_verilog -sv $REPO_ROOT/fpga/fpga_top.sv
+
+# -----------------------------------------------------------------------
+# Constraints
+add_files -fileset constrs_1 $REPO_ROOT/fpga/basys3.xdc
+
+# -----------------------------------------------------------------------
+# Include path for Hazard3 .vh headers
+set_property include_dirs $REPO_ROOT/rtl/core/hazard3/hdl [current_fileset]
+
+# Set top module
+set_property top fpga_top [current_fileset]
+update_compile_order -fileset sources_1
+
+# -----------------------------------------------------------------------
+# Synthesis
+launch_runs synth_1
+wait_on_run synth_1
+
+# Synthesis reports (written immediately, before implementation)
+open_run synth_1
+report_utilization                                                  -file $PROJECT_DIR/utilization_synth.rpt
+report_utilization -hierarchical -hierarchical_depth 6              -file $PROJECT_DIR/utilization_synth_hier.rpt
+puts "=== Synthesis done. Reports: utilization_synth.rpt, utilization_synth_hier.rpt ==="
+
+# Implementation (place & route)
+launch_runs impl_1 -to_step route_design
+wait_on_run impl_1
+
+# Implementation reports (more accurate — only written if impl succeeds)
+open_run impl_1
+report_utilization                                                  -file $PROJECT_DIR/utilization_impl.rpt
+report_utilization -hierarchical -hierarchical_depth 6              -file $PROJECT_DIR/utilization_impl_hier.rpt
+report_timing_summary                                               -file $PROJECT_DIR/timing.rpt
+puts "=== Implementation done. Reports: utilization_impl.rpt, utilization_impl_hier.rpt, timing.rpt ==="

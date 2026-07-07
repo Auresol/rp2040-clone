@@ -1,9 +1,12 @@
 // Single SRAM bank with separate instruction (read-only) and data (read/write)
-// AHB-Lite ports. Extracted from rvsoc_top for the dual-core milestone.
+// AHB-Lite ports.
 //
-// Write-first semantics on the data port: blocking assignments update the
-// array before the registered read evaluates, so back-to-back sw/lw to the
-// same address returns the new value (required by RISC-V hart ordering).
+// BRAM inference: non-blocking writes give Vivado a clean TDP BRAM pattern.
+// Write-first semantics are preserved via an explicit forwarding path: when a
+// write and a read target the same address in the same cycle, the write data
+// is captured into fwd_data_r at the same clock edge as the BRAM read, then
+// muxed over the (READ_FIRST) BRAM output combinatorially. This adds no extra
+// pipeline stage — both paths are registered at the same edge.
 
 `default_nettype none
 
@@ -33,10 +36,10 @@ module sram_bank #(
 
 localparam AW = 14;  // log2(16384) — update if DEPTH changes
 
-reg [31:0] sram [0:DEPTH-1] /* verilator public */;
+(* ram_style = "block" *) reg [31:0] sram [0:DEPTH-1] /* verilator public */;
 
 // ----------------------------------------------------------------------------
-// Instruction port
+// Instruction port (Port A — read only)
 
 wire [AW-1:0] i_word_addr = i_haddr[AW+1:2];
 reg  [31:0]   i_hrdata_r;
@@ -49,7 +52,7 @@ assign i_hready = 1'b1;
 assign i_hresp  = 1'b0;
 
 // ----------------------------------------------------------------------------
-// Data port
+// Data port (Port B — read/write)
 
 wire [AW-1:0] d_word_addr = d_haddr[AW+1:2];
 wire          d_active     = d_htrans[1];
@@ -59,8 +62,7 @@ wire [3:0] d_wstrb = (d_hsize == 3'b000) ? (4'b0001 << d_haddr[1:0]) :
                      (d_hsize == 3'b001) ? (4'b0011 << d_haddr[1:0]) :
                                             4'b1111;
 
-// AHB pipeline: register address-phase signals so they are valid alongside
-// hwdata in the following (data) cycle.
+// AHB address-phase pipeline registers
 reg [AW-1:0] d_word_addr_r;
 reg          d_hwrite_r;
 reg          d_active_r;
@@ -73,23 +75,49 @@ always @(posedge clk) begin
     d_wstrb_r     <= d_wstrb;
 end
 
-reg [31:0] d_hrdata_r;
+// BRAM Port B: byte-enable write + READ_FIRST read.
+// Non-blocking assignments allow Vivado to infer RAMB36 TDP.
+reg [31:0] d_hrdata_bram;
 
 always @(posedge clk) begin
-    // Blocking = updates the array immediately so the read below sees the
-    // new value when write and read target the same word (write-first).
     if (d_active_r && d_hwrite_r) begin
-        if (d_wstrb_r[0]) sram[d_word_addr_r][ 7: 0] = d_hwdata[ 7: 0];
-        if (d_wstrb_r[1]) sram[d_word_addr_r][15: 8] = d_hwdata[15: 8];
-        if (d_wstrb_r[2]) sram[d_word_addr_r][23:16] = d_hwdata[23:16];
-        if (d_wstrb_r[3]) sram[d_word_addr_r][31:24] = d_hwdata[31:24];
+        if (d_wstrb_r[0]) sram[d_word_addr_r][ 7: 0] <= d_hwdata[ 7: 0];
+        if (d_wstrb_r[1]) sram[d_word_addr_r][15: 8] <= d_hwdata[15: 8];
+        if (d_wstrb_r[2]) sram[d_word_addr_r][23:16] <= d_hwdata[23:16];
+        if (d_wstrb_r[3]) sram[d_word_addr_r][31:24] <= d_hwdata[31:24];
     end
-    d_hrdata_r <= sram[d_word_addr];
+    d_hrdata_bram <= sram[d_word_addr];
 end
 
-assign d_hrdata  = d_hrdata_r;
+// ----------------------------------------------------------------------------
+// Write-first forwarding
+//
+// BRAM READ_FIRST returns stale data when write and read target the same
+// address in the same cycle. Capture the write data and a hit flag at the
+// same clock edge as the BRAM read, then mux byte-by-byte over the BRAM
+// output. Both paths are registered at the same edge so the mux is purely
+// combinatorial with no added latency.
+
+wire       fwd_hit   = d_active_r && d_hwrite_r && (d_word_addr_r == d_word_addr);
+reg        fwd_hit_r;
+reg [3:0]  fwd_wstrb_r;
+reg [31:0] fwd_data_r;
+
+always @(posedge clk) begin
+    fwd_hit_r   <= fwd_hit;
+    fwd_wstrb_r <= d_wstrb_r;
+    fwd_data_r  <= d_hwdata;
+end
+
+assign d_hrdata = {
+    (fwd_hit_r && fwd_wstrb_r[3]) ? fwd_data_r[31:24] : d_hrdata_bram[31:24],
+    (fwd_hit_r && fwd_wstrb_r[2]) ? fwd_data_r[23:16] : d_hrdata_bram[23:16],
+    (fwd_hit_r && fwd_wstrb_r[1]) ? fwd_data_r[15: 8] : d_hrdata_bram[15: 8],
+    (fwd_hit_r && fwd_wstrb_r[0]) ? fwd_data_r[ 7: 0] : d_hrdata_bram[ 7: 0]
+};
+
 assign d_hready  = 1'b1;
 assign d_hresp   = 1'b0;
-assign d_hexokay = 1'b0;  // exclusive access not supported
+assign d_hexokay = 1'b0;
 
 endmodule

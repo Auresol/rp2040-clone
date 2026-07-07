@@ -1,6 +1,7 @@
 VERILATOR    = verilator
 RISCV_GCC     ?= riscv64-unknown-elf-gcc
 RISCV_OBJCOPY ?= riscv64-unknown-elf-objcopy
+VIVADO        ?= /tools/xillinx/2025.2/Vivado/bin/vivado
 
 TOP      = rvsoc_top
 RTL_DIR  = rtl
@@ -38,7 +39,7 @@ FW_DIR    = fw
 FW_FLAGS  = -march=rv32imc_zicsr -mabi=ilp32 -nostartfiles -nostdlib \
             -T $(FW_DIR)/link.ld -I$(FW_DIR) -O1
 
-FW_TESTS  = test_c_hello
+FW_TESTS  = test_c_hello test_c_pio test_c_pio_gpio
 FW_BINS   = $(addprefix $(SW_DIR)/, $(addsuffix .bin, $(FW_TESTS)))
 
 $(SW_DIR)/%.bin: $(FW_DIR)/%.c $(FW_DIR)/crt0.S $(FW_DIR)/link.ld $(FW_DIR)/soc.h
@@ -73,7 +74,7 @@ $(DEC_BIN): $(DEC_RTL) $(SIM_DIR)/tb_decoder.cpp
 test-decoder: $(DEC_BIN)
 	./$(DEC_BIN)
 
-.PHONY: all sim test sw clean remote-test remote-hello test-arbiter test-decoder hello
+.PHONY: all sim test sw clean remote-test remote-hello test-arbiter test-decoder hello remote-fpga fpga-reports
 
 all: sim
 
@@ -119,24 +120,23 @@ clean:
 REMOTE_HOST = pc-nixos
 REMOTE_PATH = /data/rp2040-clone
 
+RSYNC_EXCLUDES = \
+	--exclude='.git' \
+	--exclude='obj_dir' \
+	--exclude='fpga/vivado' \
+	--exclude='fpga/reports' \
+	--exclude='$(SW_DIR)/*.elf' \
+	--exclude='$(SW_DIR)/*.bin' \
+	--exclude='$(SW_DIR)/waveform/*.vcd' \
+	--exclude='*.log' \
+	--exclude='*.jou'
+
 remote-test:
-	rsync -av --delete \
-		--exclude='.git' \
-		--exclude='obj_dir' \
-		--exclude='$(SW_DIR)/*.elf' \
-		--exclude='$(SW_DIR)/*.bin' \
-		--exclude='$(SW_DIR)/waveform/*.vcd' \
-		. $(REMOTE_HOST):$(REMOTE_PATH)
+	rsync -av --delete $(RSYNC_EXCLUDES) . $(REMOTE_HOST):$(REMOTE_PATH)
 	ssh $(REMOTE_HOST) "cd $(REMOTE_PATH); env VERILATOR_ROOT=(verilator --getenv VERILATOR_ROOT) RISCV_GCC=(which riscv64-none-elf-gcc | get path | first) RISCV_OBJCOPY=(which riscv64-none-elf-objcopy | get path | first) make test"
 
 remote-hello:
-	rsync -av --delete \
-		--exclude='.git' \
-		--exclude='obj_dir' \
-		--exclude='$(SW_DIR)/*.elf' \
-		--exclude='$(SW_DIR)/*.bin' \
-		--exclude='$(SW_DIR)/waveform' \
-		. $(REMOTE_HOST):$(REMOTE_PATH)
+	rsync -av --delete $(RSYNC_EXCLUDES) --exclude='$(SW_DIR)/waveform' . $(REMOTE_HOST):$(REMOTE_PATH)
 	ssh $(REMOTE_HOST) "cd $(REMOTE_PATH); \
 		mkdir $(SW_DIR)/waveform; \
 		env VERILATOR_ROOT=(verilator --getenv VERILATOR_ROOT) RISCV_GCC=(which riscv64-none-elf-gcc | get path | first) RISCV_OBJCOPY=(which riscv64-none-elf-objcopy | get path | first) make hello; \
@@ -144,3 +144,20 @@ remote-hello:
 	mkdir $(SW_DIR)/waveform
 	scp $(REMOTE_HOST):$(REMOTE_PATH)/$(SW_DIR)/waveform/compress_hello.fst \
 		$(SW_DIR)/waveform/compress_hello.fst
+
+# FPGA synthesis + implementation on remote, copy reports back
+FPGA_REPORTS_DIR = fpga/reports
+
+remote-fpga:
+	rsync -av --delete $(RSYNC_EXCLUDES) . $(REMOTE_HOST):$(REMOTE_PATH)
+	ssh $(REMOTE_HOST) "cd $(REMOTE_PATH); distrobox-enter -n ubuntu22 -- $(VIVADO) -mode batch -source fpga/create_project.tcl"
+	$(MAKE) fpga-reports
+
+fpga-reports:
+	mkdir -p $(FPGA_REPORTS_DIR)
+	scp $(REMOTE_HOST):$(REMOTE_PATH)/fpga/vivado/utilization_synth.rpt      $(FPGA_REPORTS_DIR)/ || true
+	scp $(REMOTE_HOST):$(REMOTE_PATH)/fpga/vivado/utilization_synth_hier.rpt $(FPGA_REPORTS_DIR)/ || true
+	scp $(REMOTE_HOST):$(REMOTE_PATH)/fpga/vivado/utilization_impl.rpt       $(FPGA_REPORTS_DIR)/ || true
+	scp $(REMOTE_HOST):$(REMOTE_PATH)/fpga/vivado/utilization_impl_hier.rpt  $(FPGA_REPORTS_DIR)/ || true
+	scp $(REMOTE_HOST):$(REMOTE_PATH)/fpga/vivado/timing.rpt                 $(FPGA_REPORTS_DIR)/ || true
+	@echo "Reports copied to $(FPGA_REPORTS_DIR)/"

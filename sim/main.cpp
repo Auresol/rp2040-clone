@@ -56,6 +56,7 @@ int main(int argc, char **argv) {
     dut->rst_n = 1;
 
     for (int cycle = 0; cycle < MAX_CYCLES; cycle++) {
+        dut->pio_gpio_in = (uint32_t)cycle;  // fast counter — new value every clock
         dut->clk = 1; dut->eval(); tfp->dump(cycle * 2 + 4);
         dut->clk = 0; dut->eval(); tfp->dump(cycle * 2 + 5);
     }

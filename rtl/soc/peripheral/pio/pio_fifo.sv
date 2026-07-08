@@ -21,8 +21,8 @@ module pio_fifo (
     output wire [3:0]  level       // 0..8
 );
 
-// Storage
-reg [31:0] mem [0:7];
+// Storage: distributed RAM — 8×32 = 256 bits → 32 LUT6s, frees ~256 FFs vs FF-based inference
+(* ram_style = "distributed" *) reg [31:0] mem [0:7];
 
 // Pointers and count (extra bit on ptrs for full/empty disambiguation not needed
 // because we track cnt explicitly)

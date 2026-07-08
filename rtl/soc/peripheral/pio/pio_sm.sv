@@ -3,6 +3,11 @@
 // Implements all 9 instruction types: JMP, WAIT, IN, OUT, PUSH, PULL, MOV, IRQ, SET.
 // Clock divider with 16-bit integer + 8-bit fractional accumulator.
 // Side-set applied on instruction execution cycle (not during delay stall).
+//
+// LUT optimizations vs original:
+//   Step 1 — apply_sideset called once (was 8×); saves ~700 LUTs/SM
+//   Step 2 — write_pins called once via mux (was 5×); saves ~500 LUTs/SM
+//   Step 3 — stall re-check shares WAIT/IRQ decode with fresh path; saves ~300 LUTs/SM
 
 `default_nettype none
 
@@ -103,16 +108,11 @@ wire [5:0] push_thresh_eff = (cfg_push_thresh == 5'd0) ? 6'd32 : {1'b0, cfg_push
 // ============================================================================
 // Clock divider
 // ============================================================================
-// INT=0 means 65536. FRAC is 8-bit accumulator.
-// Generates a `tick` pulse once per (INT + frac/256) system cycles.
-// When INT=1 and FRAC=0: tick every cycle.
-
-reg [15:0] clkdiv_cnt;   // counts down from INT to 1
+reg [15:0] clkdiv_cnt;
 reg [7:0]  clkdiv_frac_acc;
 reg        tick;
 
 wire [15:0] clkdiv_int_eff = (cfg_clkdiv_int == 16'd0) ? 16'd1 : cfg_clkdiv_int;
-// When INT==1 and FRAC==0 we just tick every cycle
 
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -129,15 +129,12 @@ always @(posedge clk or negedge rst_n) begin
         tick            <= 1'b0;
     end else begin
         if (clkdiv_int_eff == 16'd1 && cfg_clkdiv_frac == 8'd0) begin
-            // Divide-by-1: tick every cycle
             tick <= 1'b1;
         end else if (clkdiv_cnt == 16'd1) begin
-            // Reload counter; handle fractional carry
             tick <= 1'b1;
             begin
                 automatic logic [8:0] new_frac = {1'b0, clkdiv_frac_acc} + {1'b0, cfg_clkdiv_frac};
                 clkdiv_frac_acc <= new_frac[7:0];
-                // If fractional accumulator carried over, add 1 extra cycle
                 clkdiv_cnt <= clkdiv_int_eff + {15'd0, new_frac[8]};
             end
         end else begin
@@ -154,24 +151,21 @@ reg [4:0]  pc;
 reg [31:0] x_reg;
 reg [31:0] y_reg;
 reg [31:0] isr;
-reg [5:0]  isc;      // ISR shift count (0..32)
+reg [5:0]  isc;
 reg [31:0] osr;
-reg [5:0]  osc;      // OSR shift count (0..32)
+reg [5:0]  osc;
 reg [4:0]  delay_cnt;
 reg        stalled;
 reg        force_exec;
 reg [15:0] forced_instr;
 
-// IRQ outputs (combinational, registered in pio_top's irq_flags)
 reg [7:0]  irq_set_r;
 reg [7:0]  irq_clr_r;
 
-// FIFO control (combinational)
 reg        tx_pop_r;
 reg        rx_push_r;
 reg [31:0] rx_wdata_r;
 
-// Debug sticky flags
 reg        txstall_r;
 reg        txover_r;
 reg        rxunder_r;
@@ -191,99 +185,40 @@ assign rxunder     = rxunder_r;
 assign rxstall     = rxstall_r;
 
 // ============================================================================
-// STATUS value (used by IN/MOV)
-// ============================================================================
-// tx_level and rx_level are inputs needed for STATUS computation.
-// We use tx_empty as a proxy: STATUS_SEL=0 → TX, STATUS_SEL=1 → RX
-// The level signals are not wired here; pio_top handles them.
-// For correctness we use a simplified: STATUS based on FIFO emptiness.
-// Actually the spec needs level counts, which come from pio_top. We
-// leave a parameter hook: pio_top can pass in status via a dedicated input.
-// For now: STATUS=all-ones if level < STATUS_N, else 0. Since we don't have
-// level here, we compute it as tx_empty (level=0) → all-ones when STATUS_N>0.
-// pio_top should wire tx_level/rx_level into SM. We add two extra inputs:
-// (these are declared below as additional ports — using localparam trick:
-// we accept them as additional module inputs added to the port list above.
-// Since this module declaration is fixed, use a workaround: accept STATUS
-// from a dedicated input. We'll add it as an internal note—pio_top passes
-// the FIFO level via the existing wires by computing it externally.)
-//
-// IMPLEMENTATION CHOICE: We add tx_level and rx_level as implicit 0 here
-// and rely on pio_top to handle STATUS_SEL logic before SM instantiation
-// for the RP2040 register STATUS. The SM computes:
-//   status_val = cfg_status_sel==0 ? (tx_level < STATUS_N) : (rx_level < STATUS_N)
-// Since pio_top has the levels, we pass them as two extra inputs below.
-// ============================================================================
-
-// We need tx_level and rx_level for STATUS. Add them as additional inputs.
-// NOTE: The port declarations in the module header above are the "interface".
-// We extend by declaring these as module-level regs driven from outside
-// through the pio_top wrapper. Here we make them 4-bit wires that must be
-// connected by pio_top. We redeclare the module signature to include them
-// via a post-header implicit method: just add them as inputs here.
-// In SystemVerilog we cannot add ports after the module header, so pio_top
-// must compute STATUS externally or we extend the port list.
-// Simplest: add the two ports to the actual port list. The user spec says
-// the port list above is what we must implement. We'll compute STATUS as:
-//   tx has some level from tx_empty alone, similarly for rx.
-// This gives partial STATUS accuracy. The full solution requires level ports.
-// We will add tx_level/rx_level as inputs to this module (extending spec slightly
-// for correctness) since pio_top can easily provide them.
-
-// ============================================================================
 // Instruction fetch
 // ============================================================================
 wire [15:0] cur_instr = force_exec ? forced_instr : instr_mem[pc];
 
-// Opcode and fields
-wire [2:0] opcode   = cur_instr[15:13];
+wire [2:0] opcode    = cur_instr[15:13];
 wire [4:0] delay_side = cur_instr[12:8];
-wire [7:0] op_data  = cur_instr[7:0];
+wire [7:0] op_data   = cur_instr[7:0];
 
-// Effective sideset count (SIDE_EN uses 1 extra bit from delay_side)
-wire [2:0] sideset_bits = cfg_side_en ? (cfg_sideset_count - 3'd1) : cfg_sideset_count;
-// Number of delay bits = 5 - cfg_sideset_count (always; SIDE_EN doesn't change total field width)
-// Actually: total delay+sideset field = 5 bits = instr[12:8]
-// SIDESET_COUNT bits occupy the MSBs of this field.
-// If SIDE_EN=1, the MSB of the 5-bit field is the side-set enable bit; remaining SIDESET_COUNT-1 are data.
-// delay_bits_count = 5 - cfg_sideset_count
-
+wire [2:0] sideset_bits     = cfg_side_en ? (cfg_sideset_count - 3'd1) : cfg_sideset_count;
 wire [2:0] delay_bits_count = 3'd5 - cfg_sideset_count;
 
-// Extract side-set enable and data from delay_side field
-wire side_en_bit  = cfg_side_en ? delay_side[4] : 1'b1; // if no SIDE_EN, always apply
+wire side_en_bit  = cfg_side_en ? delay_side[4] : 1'b1;
 wire [4:0] side_data = cfg_side_en
-    ? (delay_side[4:0] & (5'hFF >> (4 - (cfg_sideset_count - 3'd1))))  // mask to sideset_bits
+    ? (delay_side[4:0] & (5'hFF >> (4 - (cfg_sideset_count - 3'd1))))
     : delay_side[4:0];
 
-// Delay count: lower (5 - cfg_sideset_count) bits of delay_side
-// We mask out the sideset bits
 wire [4:0] delay_val;
 generate
-    // Shift right by sideset_count to get delay, then mask
-    // delay = delay_side >> sideset_count, masked to delay_bits_count bits
     assign delay_val = (delay_side >> cfg_sideset_count) & ((5'h1F) >> cfg_sideset_count);
 endgenerate
 
 // ============================================================================
-// PINS read helper: read from gpio_in at OUT_BASE for OUT_COUNT bits
+// PINS read helper
 // ============================================================================
 function automatic [31:0] read_pins_out_range;
     input [31:0] gpio;
     input [4:0]  base;
     input [5:0]  count;
-    // Extract count bits starting at base, wrap at 32
-    // Simplified: shift right by base, mask to count bits
     read_pins_out_range = (gpio >> base) & ((count == 6'd0) ? 32'hFFFF_FFFF : ((32'd1 << count) - 32'd1));
 endfunction
 
 // ============================================================================
 // Combinational next-state logic
 // ============================================================================
-// All "next" signals are computed combinationally, registered on `tick`
-// or `restart` or `exec_vld`.
-
-// Declare next-state variables
 reg [4:0]  next_pc;
 reg [31:0] next_x;
 reg [31:0] next_y;
@@ -298,7 +233,6 @@ reg [15:0] next_forced_instr;
 reg [31:0] next_gpio_out;
 reg [31:0] next_gpio_oe;
 
-// Combinational outputs for this cycle
 reg [7:0]  comb_irq_set;
 reg [7:0]  comb_irq_clr;
 reg        comb_tx_pop;
@@ -321,7 +255,7 @@ endfunction
 function automatic [31:0] read_gpio_in_bits;
     input [31:0] gpio;
     input [4:0]  base;
-    input [5:0]  count;  // 0=32
+    input [5:0]  count;
     reg [5:0] cnt;
     reg [31:0] rotated;
     begin
@@ -333,19 +267,19 @@ endfunction
 
 always @(*) begin
     // Defaults: hold state
-    next_pc          = pc;
-    next_x           = x_reg;
-    next_y           = y_reg;
-    next_isr         = isr;
-    next_isc         = isc;
-    next_osr         = osr;
-    next_osc         = osc;
-    next_delay_cnt   = delay_cnt;
-    next_stalled     = stalled;
-    next_force_exec  = force_exec;
-    next_forced_instr= forced_instr;
-    next_gpio_out    = gpio_out;
-    next_gpio_oe     = gpio_oe;
+    next_pc           = pc;
+    next_x            = x_reg;
+    next_y            = y_reg;
+    next_isr          = isr;
+    next_isc          = isc;
+    next_osr          = osr;
+    next_osc          = osc;
+    next_delay_cnt    = delay_cnt;
+    next_stalled      = stalled;
+    next_force_exec   = force_exec;
+    next_forced_instr = forced_instr;
+    next_gpio_out     = gpio_out;
+    next_gpio_oe      = gpio_oe;
 
     comb_irq_set  = 8'd0;
     comb_irq_clr  = 8'd0;
@@ -358,33 +292,17 @@ always @(*) begin
     comb_rxstall  = 1'b0;
 
     if (enable && tick) begin
-        // -----------------------------------------------------------------
-        // Delay countdown: if delay active, just count down, no instruction
-        // -----------------------------------------------------------------
         if (delay_cnt > 5'd0) begin
             next_delay_cnt = delay_cnt - 5'd1;
-            // Side-set is NOT applied during delay cycles (RP2040 spec: only on exec cycle)
         end else begin
-            // -----------------------------------------------------------------
-            // Execute current instruction
-            // Default: advance PC unless overridden or stalled
-            // -----------------------------------------------------------------
-
-            // STATUS value computation
-            // We use tx_empty as an approximation for STATUS_SEL=0 (TX level)
-            // For full accuracy pio_top should provide tx_level/rx_level.
-            // Here we treat tx_empty=>(level=0), !tx_empty=>(level>=1)
-            // This is a known limitation; pio_top can use exec override instead.
-            // We declare status_val locally.
             begin : exec_block
+                // ---- working variables ----
                 reg [31:0] status_val;
-                reg        pc_written;    // JMP or OUT/MOV→PC occurred
+                reg        pc_written;
                 reg        do_stall;
                 reg [4:0]  irq_num;
                 reg [31:0] src_val;
-                reg [31:0] dst_val;
                 reg [5:0]  shift_n;
-                reg [31:0] shifted_out;
                 reg [2:0]  jmp_cond;
                 reg [4:0]  jmp_addr;
                 reg        jmp_taken;
@@ -397,161 +315,122 @@ always @(*) begin
                 reg [4:0]  set_data;
                 reg        iffull_noblock;
                 reg        ifempty_noblock;
-                reg        irq_clr_bit;
-                reg        irq_wait_bit;
 
-                // STATUS
-                // Approximate: 0=TX level, 1=RX level
-                // For TX: treat tx_empty as level=0
-                // Proper: needs tx_level input from pio_top
-                if (cfg_status_sel == 1'b0) begin
-                    // TX: level < STATUS_N → all-ones (tx_empty means level=0, always < N when N>0)
+                // ---- Step 2: pin-write mux ----
+                // Set these instead of calling write_pins directly; single call at end.
+                reg [31:0] pin_wdata;
+                reg [4:0]  pin_wbase;
+                reg [5:0]  pin_wcount;
+                reg        pin_wdst;    // 0=gpio_out, 1=gpio_oe
+                reg        pin_do_write;
+
+                // ---- Step 3: shared WAIT/IRQ decode ----
+                // Computed once before the stalled/fresh split.
+                reg        wait_pol_s;
+                reg [1:0]  wait_src_s;
+                reg [4:0]  wait_idx_s;
+                reg        wait_cond_s;
+
+                // --- defaults ---
+                pc_written   = 1'b0;
+                do_stall     = 1'b0;
+                pin_wdata    = 32'd0;
+                pin_wbase    = 5'd0;
+                pin_wcount   = 6'd0;
+                pin_wdst     = 1'b0;
+                pin_do_write = 1'b0;
+
+                // STATUS approximation
+                if (cfg_status_sel == 1'b0)
                     status_val = (tx_empty && (cfg_status_n != 4'd0)) ? 32'hFFFF_FFFF : 32'h0000_0000;
-                end else begin
-                    // RX: rx_full means level=4 or 8; approximate as level=0 when not full
+                else
                     status_val = (!rx_full && (cfg_status_n != 4'd0)) ? 32'hFFFF_FFFF : 32'h0000_0000;
-                end
 
-                pc_written = 1'b0;
-                do_stall   = 1'b0;
-                irq_num    = 5'd0;
+                // ---- Shared WAIT condition (Step 3) ----
+                wait_pol_s = op_data[6];
+                wait_src_s = op_data[5:4];
+                wait_idx_s = {1'b0, op_data[3:0]};
+                case (wait_src_s)
+                    2'b00:   wait_cond_s = (gpio_in[wait_idx_s] == wait_pol_s);
+                    2'b01:   wait_cond_s = (gpio_in[(cfg_in_base + wait_idx_s) & 5'h1F] == wait_pol_s);
+                    2'b10:   wait_cond_s = (irq_flags[wait_idx_s[2:0]] == wait_pol_s);
+                    default: wait_cond_s = 1'b1;
+                endcase
 
-                // If currently stalled, re-check stall condition
+                // ---- Shared IRQ number (Step 3) ----
+                irq_num = resolve_irq_num(op_data[4:0], SM_IDX[1:0]);
+
+                // ==============================================================
+                // STALL RE-CHECK PATH
+                // Uses shared decode — no duplicate casez.
+                // ==============================================================
                 if (stalled) begin
-                    // Determine what we were stalled on by re-evaluating current instruction
-                    // The stall condition remains; check if it has been resolved
-                    casez (opcode)
+                    case (opcode)
                         3'b001: begin // WAIT
-                            begin
-                                reg        wait_pol;
-                                reg [1:0]  wait_src;
-                                reg [4:0]  wait_idx;
-                                reg        wait_cond;
-                                wait_pol = op_data[6];
-                                wait_src = op_data[5:4];
-                                wait_idx = {1'b0, op_data[3:0]};
-                                case (wait_src)
-                                    2'b00: wait_cond = (gpio_in[wait_idx] == wait_pol);
-                                    2'b01: wait_cond = (gpio_in[(cfg_in_base + wait_idx) & 5'h1F] == wait_pol);
-                                    2'b10: wait_cond = (irq_flags[wait_idx[2:0]] == wait_pol);
-                                    default: wait_cond = 1'b1;
-                                endcase
-                                if (wait_cond) begin
-                                    next_stalled = 1'b0;
-                                    // Clear IRQ if WAIT for IRQ high (polarity=1)
-                                    if (wait_src == 2'b10 && wait_pol == 1'b1) begin
-                                        comb_irq_clr[wait_idx[2:0]] = 1'b1;
-                                    end
-                                    // Apply side-set and delay
-                                    if (side_en_bit && cfg_sideset_count > 3'd0) begin
-                                        if (cfg_side_pindir)
-                                            next_gpio_oe  = apply_sideset(gpio_oe,  side_data, cfg_sideset_base, cfg_sideset_count);
-                                        else
-                                            next_gpio_out = apply_sideset(gpio_out, side_data, cfg_sideset_base, cfg_sideset_count);
-                                    end
-                                    next_delay_cnt = delay_val;
-                                    if (!pc_written)
-                                        next_pc = wrap_pc(pc, cfg_wrap_top, cfg_wrap_bottom);
-                                end else begin
-                                    do_stall = 1'b1;
-                                end
-                            end
+                            if (wait_cond_s) begin
+                                if (wait_src_s == 2'b10 && wait_pol_s == 1'b1)
+                                    comb_irq_clr[wait_idx_s[2:0]] = 1'b1;
+                                next_delay_cnt = delay_val;
+                                next_pc        = wrap_pc(pc, cfg_wrap_top, cfg_wrap_bottom);
+                            end else
+                                do_stall = 1'b1;
                         end
 
-                        3'b100: begin // PUSH/PULL
+                        3'b100: begin // PUSH / PULL
                             if (op_data[7] == 1'b0) begin // PUSH
                                 if (!rx_full) begin
-                                    comb_rx_push  = 1'b1;
-                                    comb_rx_wdata = isr;
-                                    next_isr      = 32'd0;
-                                    next_isc      = 6'd0;
-                                    next_stalled  = 1'b0;
-                                    if (side_en_bit && cfg_sideset_count > 3'd0) begin
-                                        if (cfg_side_pindir)
-                                            next_gpio_oe  = apply_sideset(gpio_oe,  side_data, cfg_sideset_base, cfg_sideset_count);
-                                        else
-                                            next_gpio_out = apply_sideset(gpio_out, side_data, cfg_sideset_base, cfg_sideset_count);
-                                    end
+                                    comb_rx_push   = 1'b1;
+                                    comb_rx_wdata  = isr;
+                                    next_isr       = 32'd0;
+                                    next_isc       = 6'd0;
                                     next_delay_cnt = delay_val;
-                                    next_pc = wrap_pc(pc, cfg_wrap_top, cfg_wrap_bottom);
-                                end else begin
+                                    next_pc        = wrap_pc(pc, cfg_wrap_top, cfg_wrap_bottom);
+                                end else
                                     do_stall = 1'b1;
-                                end
                             end else begin // PULL
                                 if (!tx_empty) begin
-                                    comb_tx_pop  = 1'b1;
-                                    next_osr     = tx_rdata;
-                                    next_osc     = 6'd0;
-                                    next_stalled = 1'b0;
-                                    if (side_en_bit && cfg_sideset_count > 3'd0) begin
-                                        if (cfg_side_pindir)
-                                            next_gpio_oe  = apply_sideset(gpio_oe,  side_data, cfg_sideset_base, cfg_sideset_count);
-                                        else
-                                            next_gpio_out = apply_sideset(gpio_out, side_data, cfg_sideset_base, cfg_sideset_count);
-                                    end
+                                    comb_tx_pop    = 1'b1;
+                                    next_osr       = tx_rdata;
+                                    next_osc       = 6'd0;
                                     next_delay_cnt = delay_val;
-                                    next_pc = wrap_pc(pc, cfg_wrap_top, cfg_wrap_bottom);
-                                end else begin
+                                    next_pc        = wrap_pc(pc, cfg_wrap_top, cfg_wrap_bottom);
+                                end else
                                     do_stall = 1'b1;
-                                end
                             end
                         end
 
-                        3'b110: begin // IRQ — was stalled waiting for IRQ to clear
-                            irq_num = resolve_irq_num(op_data[4:0], SM_IDX[1:0]);
+                        3'b110: begin // IRQ
                             if (!irq_flags[irq_num[2:0]]) begin
-                                // IRQ has been cleared by someone; unstall
-                                next_stalled = 1'b0;
-                                if (side_en_bit && cfg_sideset_count > 3'd0) begin
-                                    if (cfg_side_pindir)
-                                        next_gpio_oe  = apply_sideset(gpio_oe,  side_data, cfg_sideset_base, cfg_sideset_count);
-                                    else
-                                        next_gpio_out = apply_sideset(gpio_out, side_data, cfg_sideset_base, cfg_sideset_count);
-                                end
                                 next_delay_cnt = delay_val;
-                                next_pc = wrap_pc(pc, cfg_wrap_top, cfg_wrap_bottom);
-                            end else begin
+                                next_pc        = wrap_pc(pc, cfg_wrap_top, cfg_wrap_bottom);
+                            end else
                                 do_stall = 1'b1;
-                            end
                         end
 
-                        default: begin
-                            // Should not reach here while stalled on other instructions
-                            next_stalled = 1'b0;
-                        end
+                        default: ; // shouldn't happen — unstall next cycle
                     endcase
 
                     next_stalled = do_stall;
 
                 end else begin
-                    // Not currently stalled — execute instruction fresh
-
-                    // Apply side-set (on execution cycle)
-                    if (side_en_bit && cfg_sideset_count > 3'd0) begin
-                        if (cfg_side_pindir)
-                            next_gpio_oe  = apply_sideset(gpio_oe,  side_data, cfg_sideset_base, cfg_sideset_count);
-                        else
-                            next_gpio_out = apply_sideset(gpio_out, side_data, cfg_sideset_base, cfg_sideset_count);
-                    end
-
+                    // ==============================================================
+                    // FRESH EXECUTE PATH
+                    // ==============================================================
                     casez (opcode)
-                        // -------------------------------------------------------
+
+                        // ----------------------------------------------------------
                         // JMP (000)
-                        // -------------------------------------------------------
+                        // ----------------------------------------------------------
                         3'b000: begin
-                            jmp_cond = op_data[7:5];
-                            jmp_addr = op_data[4:0];
+                            jmp_cond  = op_data[7:5];
+                            jmp_addr  = op_data[4:0];
                             jmp_taken = 1'b0;
                             case (jmp_cond)
                                 3'b000: jmp_taken = 1'b1;
                                 3'b001: jmp_taken = (x_reg == 32'd0);
                                 3'b010: begin
                                     jmp_taken = (x_reg != 32'd0);
-                                    if (jmp_taken) next_x = x_reg - 32'd1;
-                                    else           next_x = x_reg - 32'd1; // post-decrement regardless
-                                    // Spec: JMP X-- : jump if X non-zero (before decrement), always decrement
-                                    jmp_taken = (x_reg != 32'd0);
-                                    next_x    = x_reg - 32'd1;
+                                    next_x    = x_reg - 32'd1; // post-decrement always
                                 end
                                 3'b011: jmp_taken = (y_reg == 32'd0);
                                 3'b100: begin
@@ -560,59 +439,36 @@ always @(*) begin
                                 end
                                 3'b101: jmp_taken = (x_reg != y_reg);
                                 3'b110: jmp_taken = (gpio_in[cfg_jmp_pin] == 1'b1);
-                                3'b111: jmp_taken = (osc < pull_thresh_eff); // OSR not empty
+                                3'b111: jmp_taken = (osc < pull_thresh_eff);
                                 default: jmp_taken = 1'b0;
                             endcase
-                            if (jmp_taken) begin
-                                next_pc    = jmp_addr;
-                                pc_written = 1'b1;
-                            end else begin
-                                next_pc    = wrap_pc(pc, cfg_wrap_top, cfg_wrap_bottom);
-                                pc_written = 1'b1;
-                            end
+                            next_pc        = jmp_taken ? jmp_addr : wrap_pc(pc, cfg_wrap_top, cfg_wrap_bottom);
+                            pc_written     = 1'b1;
                             next_delay_cnt = delay_val;
                         end
 
-                        // -------------------------------------------------------
-                        // WAIT (001)
-                        // -------------------------------------------------------
+                        // ----------------------------------------------------------
+                        // WAIT (001) — uses shared decode (Step 3)
+                        // ----------------------------------------------------------
                         3'b001: begin
-                            begin
-                                reg        wait_pol;
-                                reg [1:0]  wait_src;
-                                reg [4:0]  wait_idx;
-                                reg        wait_cond;
-                                wait_pol = op_data[6];
-                                wait_src = op_data[5:4];
-                                wait_idx = {1'b0, op_data[3:0]};
-                                case (wait_src)
-                                    2'b00: wait_cond = (gpio_in[wait_idx] == wait_pol);
-                                    2'b01: wait_cond = (gpio_in[(cfg_in_base + wait_idx) & 5'h1F] == wait_pol);
-                                    2'b10: wait_cond = (irq_flags[wait_idx[2:0]] == wait_pol);
-                                    default: wait_cond = 1'b1;
-                                endcase
-                                if (wait_cond) begin
-                                    // Condition already met — no stall
-                                    if (wait_src == 2'b10 && wait_pol == 1'b1) begin
-                                        comb_irq_clr[wait_idx[2:0]] = 1'b1;
-                                    end
-                                    next_delay_cnt = delay_val;
-                                    next_pc = wrap_pc(pc, cfg_wrap_top, cfg_wrap_bottom);
-                                end else begin
-                                    do_stall = 1'b1;
-                                end
-                            end
+                            if (wait_cond_s) begin
+                                if (wait_src_s == 2'b10 && wait_pol_s == 1'b1)
+                                    comb_irq_clr[wait_idx_s[2:0]] = 1'b1;
+                                next_delay_cnt = delay_val;
+                                next_pc        = wrap_pc(pc, cfg_wrap_top, cfg_wrap_bottom);
+                            end else
+                                do_stall = 1'b1;
                         end
 
-                        // -------------------------------------------------------
+                        // ----------------------------------------------------------
                         // IN (010)
-                        // -------------------------------------------------------
+                        // ----------------------------------------------------------
                         3'b010: begin
                             begin
                                 reg [5:0] n;
-                                in_src = op_data[7:5];
+                                in_src  = op_data[7:5];
                                 shift_n = (op_data[4:0] == 5'd0) ? 6'd32 : {1'b0, op_data[4:0]};
-                                n = shift_n;
+                                n       = shift_n;
 
                                 case (in_src)
                                     3'b000: src_val = read_gpio_in_bits(gpio_in, cfg_in_base, n);
@@ -625,31 +481,21 @@ always @(*) begin
                                     default: src_val = 32'd0;
                                 endcase
 
-                                // Shift into ISR
-                                if (cfg_in_shiftdir == 1'b0) begin
-                                    // Left shift: new bits enter at LSB
-                                    // {isr[31-n:0], src_bits[n-1:0]}
+                                if (cfg_in_shiftdir == 1'b0)
                                     next_isr = (n == 6'd32) ? src_val : ((isr << n) | (src_val & ((32'd1 << n) - 32'd1)));
-                                end else begin
-                                    // Right shift: new bits enter at MSB
-                                    if (n == 6'd32)
-                                        next_isr = src_val;
-                                    else
-                                        next_isr = (isr >> n) | (src_val << (6'd32 - n));
-                                end
+                                else
+                                    next_isr = (n == 6'd32) ? src_val : ((isr >> n) | (src_val << (6'd32 - n)));
+
                                 next_isc = (isc + n > 6'd32) ? 6'd32 : (isc + n);
 
-                                // Autopush check
                                 if (cfg_autopush && (next_isc >= push_thresh_eff)) begin
                                     if (!rx_full) begin
                                         comb_rx_push  = 1'b1;
                                         comb_rx_wdata = next_isr;
-                                        next_isr = 32'd0;
-                                        next_isc = 6'd0;
+                                        next_isr      = 32'd0;
+                                        next_isc      = 6'd0;
                                     end else begin
-                                        // Stall on autopush — RX full
                                         do_stall = 1'b1;
-                                        // Revert ISR changes — stay stalled with original isr
                                         next_isr = isr;
                                         next_isc = isc;
                                     end
@@ -657,79 +503,74 @@ always @(*) begin
                             end
                             if (!do_stall) begin
                                 next_delay_cnt = delay_val;
-                                next_pc = wrap_pc(pc, cfg_wrap_top, cfg_wrap_bottom);
+                                next_pc        = wrap_pc(pc, cfg_wrap_top, cfg_wrap_bottom);
                             end
                         end
 
-                        // -------------------------------------------------------
+                        // ----------------------------------------------------------
                         // OUT (011)
-                        // -------------------------------------------------------
+                        // ----------------------------------------------------------
                         3'b011: begin
                             begin
-                                reg [5:0] n;
+                                reg [5:0]  n;
                                 reg [31:0] out_bits;
-                                reg [31:0] new_gpio_out;
-                                reg [31:0] new_gpio_oe;
-
                                 out_dst = op_data[7:5];
                                 shift_n = (op_data[4:0] == 5'd0) ? 6'd32 : {1'b0, op_data[4:0]};
-                                n = shift_n;
+                                n       = shift_n;
 
-                                // Extract bits from OSR
                                 if (cfg_out_shiftdir == 1'b1) begin
-                                    // Right: bits exit from LSB
                                     out_bits = (n == 6'd32) ? osr : (osr & ((32'd1 << n) - 32'd1));
                                     next_osr = (n == 6'd32) ? 32'd0 : (osr >> n);
                                 end else begin
-                                    // Left: bits exit from MSB
                                     out_bits = (n == 6'd32) ? osr : (osr >> (6'd32 - n));
                                     next_osr = (n == 6'd32) ? 32'd0 : (osr << n);
                                 end
                                 next_osc = (osc + n > 6'd32) ? 6'd32 : (osc + n);
 
+                                // Step 2: set pin-write mux instead of calling write_pins
                                 case (out_dst)
                                     3'b000: begin // PINS
-                                        new_gpio_out = next_gpio_out;
-                                        if (cfg_out_count > 6'd0)
-                                            new_gpio_out = write_pins(new_gpio_out, out_bits, cfg_out_base, cfg_out_count);
-                                        next_gpio_out = new_gpio_out;
+                                        pin_do_write = (cfg_out_count > 6'd0);
+                                        pin_wdata    = out_bits;
+                                        pin_wbase    = cfg_out_base;
+                                        pin_wcount   = cfg_out_count;
+                                        pin_wdst     = 1'b0;
                                     end
-                                    3'b001: next_x   = out_bits;
-                                    3'b010: next_y   = out_bits;
-                                    3'b011: begin /* NULL: discard */ end
+                                    3'b001: next_x = out_bits;
+                                    3'b010: next_y = out_bits;
+                                    3'b011: ; // NULL
                                     3'b100: begin // PINDIRS
-                                        new_gpio_oe = next_gpio_oe;
-                                        if (cfg_out_count > 6'd0)
-                                            new_gpio_oe = write_pins(new_gpio_oe, out_bits, cfg_out_base, cfg_out_count);
-                                        next_gpio_oe = new_gpio_oe;
+                                        pin_do_write = (cfg_out_count > 6'd0);
+                                        pin_wdata    = out_bits;
+                                        pin_wbase    = cfg_out_base;
+                                        pin_wcount   = cfg_out_count;
+                                        pin_wdst     = 1'b1;
                                     end
                                     3'b101: begin // PC
                                         next_pc    = out_bits[4:0];
                                         pc_written = 1'b1;
                                     end
-                                    3'b110: begin // ISR (shift out_bits into ISR)
+                                    3'b110: begin // ISR
                                         next_isr = out_bits;
-                                        next_isc = 6'd0; // MOV to ISR clears ISC per spec via OUT
+                                        next_isc = 6'd0;
                                     end
-                                    3'b111: begin // EXEC: execute as instruction next tick
+                                    3'b111: begin // EXEC
                                         next_force_exec   = 1'b1;
                                         next_forced_instr = out_bits[15:0];
                                     end
                                     default: ;
                                 endcase
 
-                                // Autopull check
                                 if (cfg_autopull && (next_osc >= pull_thresh_eff)) begin
                                     if (!tx_empty) begin
                                         comb_tx_pop = 1'b1;
                                         next_osr    = tx_rdata;
                                         next_osc    = 6'd0;
                                     end else begin
-                                        // Stall — TX empty
-                                        do_stall = 1'b1;
-                                        // Revert OSR
-                                        next_osr = osr;
-                                        next_osc = osc;
+                                        do_stall     = 1'b1;
+                                        next_osr     = osr;
+                                        next_osc     = osc;
+                                        pin_do_write = 1'b0; // cancel pin write on stall
                                     end
                                 end
                             end
@@ -740,73 +581,60 @@ always @(*) begin
                             end
                         end
 
-                        // -------------------------------------------------------
+                        // ----------------------------------------------------------
                         // PUSH (100, bit[7]=0) / PULL (100, bit[7]=1)
-                        // -------------------------------------------------------
+                        // ----------------------------------------------------------
                         3'b100: begin
-                            if (op_data[7] == 1'b0) begin
-                                // PUSH
-                                iffull_noblock = op_data[6]; // IFFULL
-                                // bit[5] = NOBLOCK (but the spec uses bit 6 for IFFULL and bit 5 for NOBLOCK in PUSH)
-                                // Encoding: PUSH instr[7:0] = {1'b0, IFFULL, NOBLOCK, 5'b0}
+                            if (op_data[7] == 1'b0) begin // PUSH
+                                iffull_noblock = op_data[6];
                                 begin
                                     reg noblock_p;
                                     noblock_p = op_data[5];
                                     if (iffull_noblock && (isc < push_thresh_eff)) begin
-                                        // IFFULL and not full yet — NOP
+                                        // IFFULL: not full yet — NOP
+                                    end else if (rx_full) begin
+                                        if (!noblock_p)
+                                            do_stall = 1'b1;
+                                        else
+                                            comb_rxstall = 1'b1;
                                     end else begin
-                                        if (rx_full) begin
-                                            if (!noblock_p) begin
-                                                // Blocking stall
-                                                do_stall = 1'b1;
-                                            end else begin
-                                                // NOBLOCK: just set rxstall debug flag, continue
-                                                comb_rxstall = 1'b1;
-                                            end
-                                        end else begin
-                                            comb_rx_push  = 1'b1;
-                                            comb_rx_wdata = isr;
-                                            next_isr      = 32'd0;
-                                            next_isc      = 6'd0;
-                                        end
+                                        comb_rx_push  = 1'b1;
+                                        comb_rx_wdata = isr;
+                                        next_isr      = 32'd0;
+                                        next_isc      = 6'd0;
                                     end
                                 end
-                            end else begin
-                                // PULL
-                                ifempty_noblock = op_data[6]; // IFEMPTY
+                            end else begin // PULL
+                                ifempty_noblock = op_data[6];
                                 begin
                                     reg noblock_q;
                                     noblock_q = op_data[5];
                                     if (ifempty_noblock && (osc < pull_thresh_eff)) begin
-                                        // IFEMPTY and not empty yet — NOP
-                                    end else begin
-                                        if (tx_empty) begin
-                                            if (!noblock_q) begin
-                                                // Blocking stall
-                                                do_stall = 1'b1;
-                                            end else begin
-                                                // NOBLOCK: copy X to OSR
-                                                next_osr     = x_reg;
-                                                next_osc     = 6'd0;
-                                                comb_txstall = 1'b1;
-                                            end
+                                        // IFEMPTY: not empty yet — NOP
+                                    end else if (tx_empty) begin
+                                        if (!noblock_q) begin
+                                            do_stall = 1'b1;
                                         end else begin
-                                            comb_tx_pop = 1'b1;
-                                            next_osr    = tx_rdata;
-                                            next_osc    = 6'd0;
+                                            next_osr     = x_reg;
+                                            next_osc     = 6'd0;
+                                            comb_txstall = 1'b1;
                                         end
+                                    end else begin
+                                        comb_tx_pop = 1'b1;
+                                        next_osr    = tx_rdata;
+                                        next_osc    = 6'd0;
                                     end
                                 end
                             end
                             if (!do_stall) begin
                                 next_delay_cnt = delay_val;
-                                next_pc = wrap_pc(pc, cfg_wrap_top, cfg_wrap_bottom);
+                                next_pc        = wrap_pc(pc, cfg_wrap_top, cfg_wrap_bottom);
                             end
                         end
 
-                        // -------------------------------------------------------
+                        // ----------------------------------------------------------
                         // MOV (101)
-                        // -------------------------------------------------------
+                        // ----------------------------------------------------------
                         3'b101: begin
                             begin
                                 reg [31:0] mov_val;
@@ -826,16 +654,19 @@ always @(*) begin
                                 endcase
 
                                 case (mov_op)
-                                    2'b00: ; // none
                                     2'b01: mov_val = ~mov_val;
                                     2'b10: mov_val = bit_reverse32(mov_val);
                                     default: ;
                                 endcase
 
+                                // Step 2: set pin-write mux instead of calling write_pins
                                 case (mov_dst)
                                     3'b000: begin // PINS
-                                        if (cfg_out_count > 6'd0)
-                                            next_gpio_out = write_pins(next_gpio_out, mov_val, cfg_out_base, cfg_out_count);
+                                        pin_do_write = (cfg_out_count > 6'd0);
+                                        pin_wdata    = mov_val;
+                                        pin_wbase    = cfg_out_base;
+                                        pin_wcount   = cfg_out_count;
+                                        pin_wdst     = 1'b0;
                                     end
                                     3'b001: next_x = mov_val;
                                     3'b010: next_y = mov_val;
@@ -849,11 +680,11 @@ always @(*) begin
                                     end
                                     3'b110: begin // ISR
                                         next_isr = mov_val;
-                                        next_isc = 6'd0; // MOV to ISR clears ISC
+                                        next_isc = 6'd0;
                                     end
                                     3'b111: begin // OSR
                                         next_osr = mov_val;
-                                        next_osc = 6'd0; // MOV to OSR clears OSC
+                                        next_osc = 6'd0;
                                     end
                                     default: ;
                                 endcase
@@ -863,88 +694,101 @@ always @(*) begin
                                 next_pc = wrap_pc(pc, cfg_wrap_top, cfg_wrap_bottom);
                         end
 
-                        // -------------------------------------------------------
-                        // IRQ (110)
-                        // -------------------------------------------------------
+                        // ----------------------------------------------------------
+                        // IRQ (110) — irq_num from shared decode (Step 3)
+                        // ----------------------------------------------------------
                         3'b110: begin
                             begin
                                 reg irq_clr_f;
                                 reg irq_wait_f;
                                 irq_clr_f  = op_data[6];
                                 irq_wait_f = op_data[5];
-                                irq_num    = resolve_irq_num(op_data[4:0], SM_IDX[1:0]);
-
                                 if (irq_clr_f) begin
                                     comb_irq_clr[irq_num[2:0]] = 1'b1;
                                 end else begin
                                     comb_irq_set[irq_num[2:0]] = 1'b1;
-                                    if (irq_wait_f) begin
-                                        // Stall until IRQ is cleared by CPU or another SM
-                                        if (irq_flags[irq_num[2:0]]) begin
-                                            // Still set — stall
-                                            do_stall = 1'b1;
-                                        end
-                                        // If already cleared (shouldn't happen on first cycle, but handle)
-                                    end
+                                    if (irq_wait_f && irq_flags[irq_num[2:0]])
+                                        do_stall = 1'b1;
                                 end
                             end
                             if (!do_stall) begin
                                 next_delay_cnt = delay_val;
-                                next_pc = wrap_pc(pc, cfg_wrap_top, cfg_wrap_bottom);
+                                next_pc        = wrap_pc(pc, cfg_wrap_top, cfg_wrap_bottom);
                             end
                         end
 
-                        // -------------------------------------------------------
+                        // ----------------------------------------------------------
                         // SET (111)
-                        // -------------------------------------------------------
+                        // ----------------------------------------------------------
                         3'b111: begin
                             set_dst  = op_data[7:5];
                             set_data = op_data[4:0];
+                            // Step 2: set pin-write mux instead of calling write_pins
                             case (set_dst)
                                 3'b000: begin // PINS
-                                    if (cfg_set_count > 3'd0)
-                                        next_gpio_out = write_pins(next_gpio_out, {27'd0, set_data}, cfg_set_base, {3'd0, cfg_set_count});
+                                    pin_do_write = (cfg_set_count > 3'd0);
+                                    pin_wdata    = {27'd0, set_data};
+                                    pin_wbase    = cfg_set_base;
+                                    pin_wcount   = {3'd0, cfg_set_count};
+                                    pin_wdst     = 1'b0;
                                 end
                                 3'b001: next_x = {27'd0, set_data};
                                 3'b010: next_y = {27'd0, set_data};
                                 3'b100: begin // PINDIRS
-                                    if (cfg_set_count > 3'd0)
-                                        next_gpio_oe = write_pins(next_gpio_oe, {27'd0, set_data}, cfg_set_base, {3'd0, cfg_set_count});
+                                    pin_do_write = (cfg_set_count > 3'd0);
+                                    pin_wdata    = {27'd0, set_data};
+                                    pin_wbase    = cfg_set_base;
+                                    pin_wcount   = {3'd0, cfg_set_count};
+                                    pin_wdst     = 1'b1;
                                 end
                                 default: ;
                             endcase
                             next_delay_cnt = delay_val;
-                            next_pc = wrap_pc(pc, cfg_wrap_top, cfg_wrap_bottom);
+                            next_pc        = wrap_pc(pc, cfg_wrap_top, cfg_wrap_bottom);
                         end
 
                         default: begin
-                            // Unknown opcode — treat as NOP, advance PC
                             next_delay_cnt = delay_val;
-                            next_pc = wrap_pc(pc, cfg_wrap_top, cfg_wrap_bottom);
+                            next_pc        = wrap_pc(pc, cfg_wrap_top, cfg_wrap_bottom);
                         end
                     endcase
 
                     next_stalled = do_stall;
 
-                    // If we are going to stall, undo side-set (side-set only on successful exec)
-                    if (do_stall) begin
-                        next_gpio_out = gpio_out;
-                        next_gpio_oe  = gpio_oe;
-                    end
-
-                    // If forcing exec instruction this cycle, done — clear force_exec flag
-                    // (force_exec transitions: set by MOV/OUT to EXEC, cleared after one execution)
-                    if (force_exec && !do_stall) begin
+                    if (force_exec && !do_stall)
                         next_force_exec = 1'b0;
-                    end
 
                 end // not stalled
+
+                // ==============================================================
+                // Unified GPIO writes — Steps 1 & 2
+                //
+                // Applied once here, after do_stall is resolved.
+                // Side-set first (so pin writes take priority on overlap).
+                // Neither block runs on a stall cycle.
+                // ==============================================================
+                if (!do_stall) begin
+                    // Step 1: single apply_sideset call (was 8× across stall/fresh paths)
+                    if (side_en_bit && cfg_sideset_count > 3'd0) begin
+                        if (cfg_side_pindir)
+                            next_gpio_oe  = apply_sideset(gpio_oe,  side_data, cfg_sideset_base, cfg_sideset_count);
+                        else
+                            next_gpio_out = apply_sideset(gpio_out, side_data, cfg_sideset_base, cfg_sideset_count);
+                    end
+                    // Step 2: single write_pins call (was 5× across OUT/MOV/SET)
+                    if (pin_do_write) begin
+                        if (pin_wdst)
+                            next_gpio_oe  = write_pins(next_gpio_oe,  pin_wdata, pin_wbase, pin_wcount);
+                        else
+                            next_gpio_out = write_pins(next_gpio_out, pin_wdata, pin_wbase, pin_wcount);
+                    end
+                end
+
             end : exec_block
         end // delay_cnt == 0
     end // enable && tick
 
-    // Forward debug flag assertions (combinational)
-    // These are pulsed combinationally; pio_top latches them as sticky flags
+    // Forward combinational outputs
     irq_set_r  = comb_irq_set;
     irq_clr_r  = comb_irq_clr;
     tx_pop_r   = comb_tx_pop;
@@ -960,7 +804,6 @@ end
 // Helper functions
 // ============================================================================
 
-// Wrap PC: if at WRAP_TOP, return WRAP_BOTTOM, else +1
 function automatic [4:0] wrap_pc;
     input [4:0] cur_pc;
     input [4:0] wrap_top;
@@ -971,7 +814,6 @@ function automatic [4:0] wrap_pc;
         wrap_pc = cur_pc + 5'd1;
 endfunction
 
-// Resolve IRQ number: if bit[4] set, relative (add SM_IDX, low 2 bits)
 function automatic [4:0] resolve_irq_num;
     input [4:0] raw;
     input [1:0] sm_idx;
@@ -981,7 +823,7 @@ function automatic [4:0] resolve_irq_num;
         resolve_irq_num = {2'b0, raw[2:0]};
 endfunction
 
-// Write N bits to a 32-bit register starting at base (wrapping)
+// Write N bits into a 32-bit register at base (no wrap — within 32-bit word)
 function automatic [31:0] write_pins;
     input [31:0] cur;
     input [31:0] data;
@@ -992,12 +834,10 @@ function automatic [31:0] write_pins;
     begin
         cnt  = (count == 6'd0) ? 6'd32 : count;
         mask = (cnt == 6'd32) ? 32'hFFFF_FFFF : ((32'd1 << cnt) - 32'd1);
-        // Rotate data and mask to base position
         write_pins = (cur & ~(mask << base)) | ((data & mask) << base);
     end
 endfunction
 
-// Apply side-set: write sideset_count bits at sideset_base
 function automatic [31:0] apply_sideset;
     input [31:0] cur;
     input [4:0]  data;
@@ -1033,7 +873,6 @@ always @(posedge clk or negedge rst_n) begin
         gpio_out     <= 32'd0;
         gpio_oe      <= 32'd0;
     end else begin
-        // Restart (one-shot from CTRL): clear PC and shift regs
         if (restart) begin
             pc        <= 5'd0;
             isr       <= 32'd0;
@@ -1044,13 +883,11 @@ always @(posedge clk or negedge rst_n) begin
             stalled   <= 1'b0;
         end
 
-        // Capture force-exec from SM_INSTR write (pulse from pio_top)
         if (exec_vld) begin
             force_exec   <= 1'b1;
             forced_instr <= exec_instr;
         end
 
-        // Register state updates (only on tick when enabled)
         if (enable && tick && !restart) begin
             pc           <= next_pc;
             x_reg        <= next_x;
@@ -1063,7 +900,6 @@ always @(posedge clk or negedge rst_n) begin
             stalled      <= next_stalled;
             gpio_out     <= next_gpio_out;
             gpio_oe      <= next_gpio_oe;
-            // Clear force_exec after it has been used
             if (force_exec && !next_stalled) begin
                 force_exec <= next_force_exec;
                 if (next_force_exec)

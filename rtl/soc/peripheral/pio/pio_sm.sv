@@ -108,15 +108,20 @@ wire [5:0] push_thresh_eff = (cfg_push_thresh == 5'd0) ? 6'd32 : {1'b0, cfg_push
 // ============================================================================
 // Clock divider
 // ============================================================================
-reg [15:0] clkdiv_cnt;
+// FPGA build: counter narrowed to 8 bits (max divide = 256).
+// Full RP2040 spec uses 16-bit INT (max 65536) — restore for ASIC if needed.
+// Saves ~80 LUTs/SM (×8 SMs = 640 LUTs) vs 16-bit on Artix-7.
+reg [7:0]  clkdiv_cnt;
 reg [7:0]  clkdiv_frac_acc;
 reg        tick;
 
-wire [15:0] clkdiv_int_eff = (cfg_clkdiv_int == 16'd0) ? 16'd1 : cfg_clkdiv_int;
+wire [7:0] clkdiv_int_eff = (cfg_clkdiv_int[15:8] != 8'd0) ? 8'd255 :   // saturate if upper byte set
+                             (cfg_clkdiv_int[7:0]  == 8'd0) ? 8'd1   :   // 0 → 1 (divide-by-1)
+                                                               cfg_clkdiv_int[7:0];
 
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-        clkdiv_cnt      <= 16'd1;
+        clkdiv_cnt      <= 8'd1;
         clkdiv_frac_acc <= 8'd0;
         tick            <= 1'b0;
     end else if (!enable) begin
@@ -128,18 +133,18 @@ always @(posedge clk or negedge rst_n) begin
         clkdiv_frac_acc <= 8'd0;
         tick            <= 1'b0;
     end else begin
-        if (clkdiv_int_eff == 16'd1 && cfg_clkdiv_frac == 8'd0) begin
+        if (clkdiv_int_eff == 8'd1 && cfg_clkdiv_frac == 8'd0) begin
             tick <= 1'b1;
-        end else if (clkdiv_cnt == 16'd1) begin
+        end else if (clkdiv_cnt == 8'd1) begin
             tick <= 1'b1;
             begin
                 automatic logic [8:0] new_frac = {1'b0, clkdiv_frac_acc} + {1'b0, cfg_clkdiv_frac};
                 clkdiv_frac_acc <= new_frac[7:0];
-                clkdiv_cnt <= clkdiv_int_eff + {15'd0, new_frac[8]};
+                clkdiv_cnt <= clkdiv_int_eff + {7'd0, new_frac[8]};
             end
         end else begin
             tick       <= 1'b0;
-            clkdiv_cnt <= clkdiv_cnt - 16'd1;
+            clkdiv_cnt <= clkdiv_cnt - 8'd1;
         end
     end
 end

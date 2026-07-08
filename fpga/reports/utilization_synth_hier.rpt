@@ -1,7 +1,7 @@
 Copyright 1986-2022 Xilinx, Inc. All Rights Reserved. Copyright 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
 -------------------------------------------------------------------------------------------------------------------------------------------------
 | Tool Version : Vivado v.2025.2 (lin64) Build 6299465 Fri Nov 14 12:34:56 MST 2025
-| Date         : Tue Jul  7 23:37:26 2026
+| Date         : Wed Jul  8 00:36:26 2026
 | Host         : pc-nixos running 64-bit Ubuntu"
 VERSION_ID="22.04 22.04.5 LTS (Jammy Jellyfish)"
 VERSION_CODENAME=jammy
@@ -24,9 +24,9 @@ Table of Contents
 +------------------------------+---------------------------+------------+------------+---------+------+------+--------+--------+------------+
 |           Instance           |           Module          | Total LUTs | Logic LUTs | LUTRAMs | SRLs |  FFs | RAMB36 | RAMB18 | DSP Blocks |
 +------------------------------+---------------------------+------------+------------+---------+------+------+--------+--------+------------+
-| fpga_top                     |                     (top) |      27190 |      27190 |       0 |    0 | 9524 |     32 |      2 |          0 |
+| fpga_top                     |                     (top) |      22722 |      22338 |     384 |    0 | 5355 |     32 |      2 |          0 |
 |   (fpga_top)                 |                     (top) |          0 |          0 |       0 |    0 |    0 |      0 |      0 |          0 |
-|   soc                        |                 rvsoc_top |      27190 |      27190 |       0 |    0 | 9524 |     32 |      2 |          0 |
+|   soc                        |                 rvsoc_top |      22722 |      22338 |     384 |    0 | 5355 |     32 |      2 |          0 |
 |     cpu0                     |         hazard3_cpu_2port |       2065 |       2065 |       0 |    0 |  549 |      0 |      2 |          0 |
 |       core                   |              hazard3_core |       2065 |       2065 |       0 |    0 |  547 |      0 |      2 |          0 |
 |         (core)               |              hazard3_core |         56 |         56 |       0 |    0 |  112 |      0 |      0 |          0 |
@@ -37,34 +37,26 @@ Table of Contents
 |         regs                 |      hazard3_regfile_1w2r |        176 |        176 |       0 |    0 |    0 |      0 |      2 |          0 |
 |     mem                      |                  sram_top |         49 |         49 |       0 |    0 |   87 |     32 |      0 |          0 |
 |       bank                   |                 sram_bank |         49 |         49 |       0 |    0 |   87 |     32 |      0 |          0 |
-|     pio0                     |                   pio_top |      12990 |      12990 |       0 |    0 | 4439 |      0 |      0 |          0 |
-|       (pio0)                 |                   pio_top |        876 |        876 |       0 |    0 | 1279 |      0 |      0 |          0 |
-|       fifo_inst[0].u_rx_fifo |                pio_fifo_8 |        134 |        134 |       0 |    0 |  266 |      0 |      0 |          0 |
-|       fifo_inst[0].u_tx_fifo |                pio_fifo_9 |         87 |         87 |       0 |    0 |  266 |      0 |      0 |          0 |
-|       fifo_inst[1].u_rx_fifo |               pio_fifo_10 |        199 |        199 |       0 |    0 |  266 |      0 |      0 |          0 |
-|       fifo_inst[1].u_tx_fifo |               pio_fifo_11 |         87 |         87 |       0 |    0 |  266 |      0 |      0 |          0 |
-|       fifo_inst[2].u_rx_fifo |               pio_fifo_12 |        203 |        203 |       0 |    0 |  266 |      0 |      0 |          0 |
-|       fifo_inst[2].u_tx_fifo |               pio_fifo_13 |         83 |         83 |       0 |    0 |  266 |      0 |      0 |          0 |
-|       fifo_inst[3].u_rx_fifo |               pio_fifo_14 |        122 |        122 |       0 |    0 |  266 |      0 |      0 |          0 |
-|       fifo_inst[3].u_tx_fifo |               pio_fifo_15 |         86 |         86 |       0 |    0 |  266 |      0 |      0 |          0 |
-|       sm_inst[0].u_sm        |                 pio_sm_16 |       2827 |       2827 |       0 |    0 |  258 |      0 |      0 |          0 |
-|       sm_inst[1].u_sm        | pio_sm__parameterized0_17 |       2648 |       2648 |       0 |    0 |  258 |      0 |      0 |          0 |
-|       sm_inst[2].u_sm        | pio_sm__parameterized1_18 |       2778 |       2778 |       0 |    0 |  258 |      0 |      0 |          0 |
-|       sm_inst[3].u_sm        | pio_sm__parameterized2_19 |       2860 |       2860 |       0 |    0 |  258 |      0 |      0 |          0 |
-|     pio1                     |                 pio_top_0 |      12060 |      12060 |       0 |    0 | 4413 |      0 |      0 |          0 |
-|       (pio1)                 |                 pio_top_0 |        184 |        184 |       0 |    0 | 1253 |      0 |      0 |          0 |
-|       fifo_inst[0].u_rx_fifo |                  pio_fifo |        104 |        104 |       0 |    0 |  266 |      0 |      0 |          0 |
-|       fifo_inst[0].u_tx_fifo |                pio_fifo_1 |         86 |         86 |       0 |    0 |  266 |      0 |      0 |          0 |
-|       fifo_inst[1].u_rx_fifo |                pio_fifo_2 |        194 |        194 |       0 |    0 |  266 |      0 |      0 |          0 |
-|       fifo_inst[1].u_tx_fifo |                pio_fifo_3 |         85 |         85 |       0 |    0 |  266 |      0 |      0 |          0 |
-|       fifo_inst[2].u_rx_fifo |                pio_fifo_4 |        195 |        195 |       0 |    0 |  266 |      0 |      0 |          0 |
-|       fifo_inst[2].u_tx_fifo |                pio_fifo_5 |         82 |         82 |       0 |    0 |  266 |      0 |      0 |          0 |
-|       fifo_inst[3].u_rx_fifo |                pio_fifo_6 |        103 |        103 |       0 |    0 |  266 |      0 |      0 |          0 |
-|       fifo_inst[3].u_tx_fifo |                pio_fifo_7 |         85 |         85 |       0 |    0 |  266 |      0 |      0 |          0 |
-|       sm_inst[0].u_sm        |                    pio_sm |       2799 |       2799 |       0 |    0 |  258 |      0 |      0 |          0 |
-|       sm_inst[1].u_sm        |    pio_sm__parameterized0 |       2619 |       2619 |       0 |    0 |  258 |      0 |      0 |          0 |
-|       sm_inst[2].u_sm        |    pio_sm__parameterized1 |       2727 |       2727 |       0 |    0 |  258 |      0 |      0 |          0 |
-|       sm_inst[3].u_sm        |    pio_sm__parameterized2 |       2797 |       2797 |       0 |    0 |  258 |      0 |      0 |          0 |
+|     pio0                     |                   pio_top |      10717 |      10525 |     192 |    0 | 2354 |      0 |      0 |          0 |
+|       (pio0)                 |                   pio_top |        826 |        826 |       0 |    0 | 1278 |      0 |      0 |          0 |
+|       fifo_inst[0].u_rx_fifo |                pio_fifo_8 |        167 |        143 |      24 |    0 |   10 |      0 |      0 |          0 |
+|       fifo_inst[1].u_rx_fifo |               pio_fifo_10 |        164 |        140 |      24 |    0 |   10 |      0 |      0 |          0 |
+|       fifo_inst[2].u_rx_fifo |               pio_fifo_12 |        147 |        123 |      24 |    0 |   10 |      0 |      0 |          0 |
+|       fifo_inst[3].u_rx_fifo |               pio_fifo_14 |         95 |         71 |      24 |    0 |   10 |      0 |      0 |          0 |
+|       sm_inst[0].u_sm        |                 pio_sm_16 |       2255 |       2255 |       0 |    0 |  249 |      0 |      0 |          0 |
+|       sm_inst[1].u_sm        | pio_sm__parameterized0_17 |       2282 |       2282 |       0 |    0 |  249 |      0 |      0 |          0 |
+|       sm_inst[2].u_sm        | pio_sm__parameterized1_18 |       2288 |       2288 |       0 |    0 |  249 |      0 |      0 |          0 |
+|       sm_inst[3].u_sm        | pio_sm__parameterized2_19 |       2340 |       2340 |       0 |    0 |  249 |      0 |      0 |          0 |
+|     pio1                     |                 pio_top_0 |       9865 |       9673 |     192 |    0 | 2329 |      0 |      0 |          0 |
+|       (pio1)                 |                 pio_top_0 |        204 |        204 |       0 |    0 | 1253 |      0 |      0 |          0 |
+|       fifo_inst[0].u_rx_fifo |                  pio_fifo |        145 |        121 |      24 |    0 |   10 |      0 |      0 |          0 |
+|       fifo_inst[1].u_rx_fifo |                pio_fifo_2 |        145 |        121 |      24 |    0 |   10 |      0 |      0 |          0 |
+|       fifo_inst[2].u_rx_fifo |                pio_fifo_4 |        142 |        118 |      24 |    0 |   10 |      0 |      0 |          0 |
+|       fifo_inst[3].u_rx_fifo |                pio_fifo_6 |         62 |         38 |      24 |    0 |   10 |      0 |      0 |          0 |
+|       sm_inst[0].u_sm        |                    pio_sm |       2215 |       2215 |       0 |    0 |  249 |      0 |      0 |          0 |
+|       sm_inst[1].u_sm        |    pio_sm__parameterized0 |       2264 |       2264 |       0 |    0 |  249 |      0 |      0 |          0 |
+|       sm_inst[2].u_sm        |    pio_sm__parameterized1 |       2227 |       2227 |       0 |    0 |  249 |      0 |      0 |          0 |
+|       sm_inst[3].u_sm        |    pio_sm__parameterized2 |       2316 |       2316 |       0 |    0 |  249 |      0 |      0 |          0 |
 +------------------------------+---------------------------+------------+------------+---------+------+------+--------+--------+------------+
 
 

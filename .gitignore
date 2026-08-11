@@ -5,5 +5,5 @@ sim/sw/*.elf
 sim/sw/*.hex
 sim/sw/*.o
 
-fpga/bistream
+fpga/bitstream
 fpga/reports*

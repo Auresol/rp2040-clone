@@ -4,3 +4,6 @@ obj_dir*/
 sim/sw/*.elf
 sim/sw/*.hex
 sim/sw/*.o
+
+fpga/bistream
+fpga/reports*

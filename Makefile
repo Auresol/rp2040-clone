@@ -74,7 +74,7 @@ $(DEC_BIN): $(DEC_RTL) $(SIM_DIR)/tb_decoder.cpp
 test-decoder: $(DEC_BIN)
 	./$(DEC_BIN)
 
-.PHONY: all sim test sw clean remote-test remote-hello test-arbiter test-decoder hello remote-fpga fpga-reports
+.PHONY: all sim test sw clean remote-test remote-hello test-arbiter test-decoder hello remote-fpga fpga-reports remote-fpga-kr260 fpga-reports-kr260 remote-bitstream-kr260
 
 all: sim
 
@@ -124,7 +124,10 @@ RSYNC_EXCLUDES = \
 	--exclude='.git' \
 	--exclude='obj_dir' \
 	--exclude='fpga/vivado' \
+	--exclude='fpga/vivado_kr260' \
 	--exclude='fpga/reports' \
+	--exclude='fpga/reports_kr260' \
+	--exclude='fpga/bitstream' \
 	--exclude='$(SW_DIR)/*.elf' \
 	--exclude='$(SW_DIR)/*.bin' \
 	--exclude='$(SW_DIR)/waveform/*.vcd' \
@@ -161,3 +164,33 @@ fpga-reports:
 	scp $(REMOTE_HOST):$(REMOTE_PATH)/fpga/vivado/utilization_impl_hier.rpt  $(FPGA_REPORTS_DIR)/ || true
 	scp $(REMOTE_HOST):$(REMOTE_PATH)/fpga/vivado/timing.rpt                 $(FPGA_REPORTS_DIR)/ || true
 	@echo "Reports copied to $(FPGA_REPORTS_DIR)/"
+
+FPGA_KR260_REPORTS_DIR = fpga/reports_kr260
+
+remote-fpga-kr260:
+	rsync -av --delete $(RSYNC_EXCLUDES) --exclude='fpga/vivado_kr260' . $(REMOTE_HOST):$(REMOTE_PATH)
+	ssh $(REMOTE_HOST) "cd $(REMOTE_PATH); distrobox-enter -n ubuntu22 -- $(VIVADO) -mode batch -source fpga/create_project_kr260.tcl"
+	$(MAKE) fpga-reports-kr260
+
+fpga-reports-kr260:
+	mkdir -p $(FPGA_KR260_REPORTS_DIR)
+	scp $(REMOTE_HOST):$(REMOTE_PATH)/fpga/vivado_kr260/utilization_synth.rpt      $(FPGA_KR260_REPORTS_DIR)/ || true
+	scp $(REMOTE_HOST):$(REMOTE_PATH)/fpga/vivado_kr260/utilization_synth_hier.rpt $(FPGA_KR260_REPORTS_DIR)/ || true
+	scp $(REMOTE_HOST):$(REMOTE_PATH)/fpga/vivado_kr260/utilization_impl.rpt       $(FPGA_KR260_REPORTS_DIR)/ || true
+	scp $(REMOTE_HOST):$(REMOTE_PATH)/fpga/vivado_kr260/utilization_impl_hier.rpt  $(FPGA_KR260_REPORTS_DIR)/ || true
+	scp $(REMOTE_HOST):$(REMOTE_PATH)/fpga/vivado_kr260/timing.rpt                 $(FPGA_KR260_REPORTS_DIR)/ || true
+	@echo "Reports copied to $(FPGA_KR260_REPORTS_DIR)/"
+
+# Bitstream: convert .bit → .bit.bin on pc-nixos, then scp here
+BITSTREAM_DIR    = fpga/bitstream
+KR260_BIT_REMOTE = $(REMOTE_PATH)/fpga/vivado_kr260/rvsoc_kr260.runs/impl_1/fpga_top_kr260.bit
+BOOTGEN          = /tools/xillinx/2025.2/Vivado/bin/bootgen
+
+remote-bitstream-kr260:
+	mkdir -p $(BITSTREAM_DIR)
+	ssh $(REMOTE_HOST) "cd /tmp; cp $(KR260_BIT_REMOTE) fpga_top.bit; cp $(REMOTE_PATH)/fpga/kr260.bif .; distrobox-enter -n ubuntu22 -- $(BOOTGEN) -image kr260.bif -arch zynqmp -o fpga_top.bit.bin -w on"
+	scp $(REMOTE_HOST):/tmp/fpga_top.bit.bin $(BITSTREAM_DIR)/
+	@echo "Bitstream ready at $(BITSTREAM_DIR)/fpga_top.bit.bin"
+	@echo "To load on KR260:"
+	@echo "  scp $(BITSTREAM_DIR)/fpga_top.bit.bin ubuntu@<board-ip>:/lib/firmware/"
+	@echo "  ssh ubuntu@<board-ip> 'echo 0 > /sys/class/fpga_manager/fpga0/flags && echo fpga_top.bit.bin > /sys/class/fpga_manager/fpga0/firmware'"

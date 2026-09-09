@@ -65,7 +65,7 @@ test-decoder: $(DEC_BIN)
 
 # ---------------------------------------------------------------------------
 
-.PHONY: all sim test sw clean remote-test test-arbiter test-decoder
+.PHONY: all sim test sw clean remote-test test-arbiter test-decoder test-uart
 
 all: sim
 
@@ -100,8 +100,12 @@ test: $(SIM_BIN) $(SW_BINS)
 
 sw: $(SW_BINS)
 
+# CocoTB peripheral unit tests (run locally — no compile on test-only changes)
+test-uart:
+	cd $(TB_DIR) && nix-shell -p python313Packages.cocotb verilator --run "python3 test_uart.py"
+
 clean:
-	rm -rf obj_dir* $(SW_DIR)/*.elf $(SW_DIR)/*.bin
+	rm -rf obj_dir* sim_build $(SW_DIR)/*.elf $(SW_DIR)/*.bin
 
 # ---------------------------------------------------------------------------
 # Remote test machine

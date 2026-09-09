@@ -4,3 +4,6 @@ obj_dir*/
 sim/sw/*.elf
 sim/sw/*.hex
 sim/sw/*.o
+sim/tb/__pycache__/
+sim/tb/sim_build/
+sim/tb/results.xml

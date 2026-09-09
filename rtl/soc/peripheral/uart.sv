@@ -266,7 +266,7 @@ always @(posedge clk or negedge rst_n) begin
                 if (rx_baud_cnt == 16'h0) begin
                     if (rx_in && !rx_full) begin
                         // Valid stop bit and FIFO has room — push
-                        rx_mem[rx_widx] <= {rx_in, rx_shift[7:1]};
+                        rx_mem[rx_widx] <= rx_shift;
                         rx_wptr         <= rx_wptr + 1;
                     end
                     rx_state <= RX_IDLE;
@@ -321,7 +321,7 @@ end
 // AHB read data (combinational)
 
 wire [31:0] uartfr = {24'h0,
-                      ~tx_empty,  // [7] TXFE — TX FIFO empty
+                      tx_empty,   // [7] TXFE — TX FIFO empty
                       rx_full,    // [6] RXFF — RX FIFO full
                       tx_full,    // [5] TXFF — TX FIFO full
                       rx_empty,   // [4] RXFE — RX FIFO empty

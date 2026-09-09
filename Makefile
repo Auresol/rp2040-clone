@@ -1,6 +1,6 @@
 VERILATOR    = verilator
-RISCV_GCC     ?= riscv64-unknown-elf-gcc
-RISCV_OBJCOPY ?= riscv64-unknown-elf-objcopy
+RISCV_GCC     ?= riscv64-none-elf-gcc
+RISCV_OBJCOPY ?= riscv64-none-elf-objcopy
 VIVADO        ?= /tools/xillinx/2025.2/Vivado/bin/vivado
 
 TOP      = rvsoc_top
@@ -39,7 +39,7 @@ FW_DIR    = fw
 FW_FLAGS  = -march=rv32imc_zicsr -mabi=ilp32 -nostartfiles -nostdlib \
             -T $(FW_DIR)/link.ld -I$(FW_DIR) -O1
 
-FW_TESTS  = test_c_hello test_c_pio test_c_pio_gpio
+FW_TESTS  = test_c_hello test_c_pio test_c_pio_gpio blink multi_blink pio_blink pio_pwm
 FW_BINS   = $(addprefix $(SW_DIR)/, $(addsuffix .bin, $(FW_TESTS)))
 
 $(SW_DIR)/%.bin: $(FW_DIR)/%.c $(FW_DIR)/crt0.S $(FW_DIR)/link.ld $(FW_DIR)/soc.h
@@ -47,7 +47,7 @@ $(SW_DIR)/%.bin: $(FW_DIR)/%.c $(FW_DIR)/crt0.S $(FW_DIR)/link.ld $(FW_DIR)/soc.
 	$(RISCV_OBJCOPY) -O binary $(SW_DIR)/$*.elf $(SW_DIR)/$*.bin
 	rm -f $(SW_DIR)/$*.elf
 
-TESTS = hello test_alu test_mem test_branch test_gpio test_pio
+TESTS = hello test_alu test_mem test_branch test_gpio test_pio gpio_on
 SW_BINS = $(addprefix $(SW_DIR)/, $(addsuffix .bin, $(TESTS)))
 
 ARB_RTL = $(RTL_DIR)/soc/fabric/ahb_arbiter.sv
@@ -74,7 +74,7 @@ $(DEC_BIN): $(DEC_RTL) $(SIM_DIR)/tb_decoder.cpp
 test-decoder: $(DEC_BIN)
 	./$(DEC_BIN)
 
-.PHONY: all sim test sw clean remote-test remote-hello test-arbiter test-decoder hello remote-fpga fpga-reports remote-fpga-kr260 fpga-reports-kr260 remote-bitstream-kr260
+.PHONY: all sim test sw clean remote-test remote-hello test-arbiter test-decoder hello remote-fpga fpga-reports remote-fpga-kr260 fpga-reports-kr260 remote-bitstream-kr260 firmware-mem
 
 all: sim
 
@@ -167,9 +167,21 @@ fpga-reports:
 
 FPGA_KR260_REPORTS_DIR = fpga/reports_kr260
 
-remote-fpga-kr260:
+# Firmware to bake into bitstream — override with make remote-fpga-kr260-fw FW=sim/sw/test_gpio.bin
+FW          ?= sim/sw/test_gpio.bin
+FW_MEM       = fpga/firmware.mem
+REMOTE_FW_MEM = $(REMOTE_PATH)/$(FW_MEM)
+
+# Generate .mem file from firmware .bin.
+# firmware-mem is phony so it always regenerates — Make's timestamp check
+# doesn't detect FW path changes between successive make invocations.
+.PHONY: firmware-mem
+firmware-mem:
+	python3 scripts/bin2mem.py $(FW) $(FW_MEM)
+
+remote-fpga-kr260: firmware-mem
 	rsync -av --delete $(RSYNC_EXCLUDES) --exclude='fpga/vivado_kr260' . $(REMOTE_HOST):$(REMOTE_PATH)
-	ssh $(REMOTE_HOST) "cd $(REMOTE_PATH); distrobox-enter -n ubuntu22 -- $(VIVADO) -mode batch -source fpga/create_project_kr260.tcl"
+	ssh $(REMOTE_HOST) "cd $(REMOTE_PATH); FIRMWARE_MEM=$(REMOTE_FW_MEM) distrobox-enter -n ubuntu22 -- $(VIVADO) -mode batch -source fpga/create_project_kr260.tcl"
 	$(MAKE) fpga-reports-kr260
 
 fpga-reports-kr260:

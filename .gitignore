@@ -7,3 +7,4 @@ sim/sw/*.o
 
 fpga/bitstream
 fpga/reports*
+fpga/firmware.mem

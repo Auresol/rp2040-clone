@@ -38,6 +38,10 @@ localparam AW = 14;  // log2(16384) — update if DEPTH changes
 
 (* ram_style = "block" *) reg [31:0] sram [0:DEPTH-1] /* verilator public */;
 
+`ifdef SRAM_INIT_FILE
+initial $readmemh(`SRAM_INIT_FILE, sram);
+`endif
+
 // ----------------------------------------------------------------------------
 // Instruction port (Port A — read only)
 

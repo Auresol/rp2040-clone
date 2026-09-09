@@ -5,8 +5,8 @@ VIVADO        ?= /tools/xillinx/2025.2/Vivado/bin/vivado
 
 TOP      = rvsoc_top
 RTL_DIR  = rtl
-SIM_DIR  = sim
-SW_DIR   = $(SIM_DIR)/sw
+TB_DIR   = sim/tb
+SW_DIR   = sim/sw
 
 HAZARD3_HDL = $(RTL_DIR)/core/hazard3/hdl
 
@@ -24,9 +24,9 @@ VERILATOR_FLAGS = \
 	-y $(RTL_DIR)/soc/peripheral \
 	-y $(RTL_DIR)/soc/peripheral/pio \
 	--top-module $(TOP)
-	
+
 SRC_RTL  = $(RTL_DIR)/soc/$(TOP).sv
-SIM_CPP  = $(SIM_DIR)/main.cpp
+SIM_CPP  = $(TB_DIR)/main.cpp
 SIM_BIN  = obj_dir/V$(TOP)
 
 # All SystemVerilog sources — simulator rebuilds when any .sv changes.
@@ -50,14 +50,17 @@ $(SW_DIR)/%.bin: $(FW_DIR)/%.c $(FW_DIR)/crt0.S $(FW_DIR)/link.ld $(FW_DIR)/soc.
 TESTS = hello test_alu test_mem test_branch test_gpio test_pio gpio_on test_uart
 SW_BINS = $(addprefix $(SW_DIR)/, $(addsuffix .bin, $(TESTS)))
 
+# ---------------------------------------------------------------------------
+# Unit testbenches (standalone, no SoC)
+
 ARB_RTL = $(RTL_DIR)/soc/fabric/ahb_arbiter.sv
 ARB_BIN = obj_dir_arb/Vahb_arbiter
 
-$(ARB_BIN): $(ARB_RTL) $(SIM_DIR)/tb_arbiter.cpp
+$(ARB_BIN): $(ARB_RTL) $(TB_DIR)/tb_arbiter.cpp
 	$(VERILATOR) --cc --exe --build -Wno-fatal \
 		--top-module ahb_arbiter \
 		-Mdir obj_dir_arb \
-		$(ARB_RTL) $(SIM_DIR)/tb_arbiter.cpp
+		$(ARB_RTL) $(TB_DIR)/tb_arbiter.cpp
 
 test-arbiter: $(ARB_BIN)
 	./$(ARB_BIN)
@@ -65,16 +68,18 @@ test-arbiter: $(ARB_BIN)
 DEC_RTL = $(RTL_DIR)/soc/fabric/ahb_decoder.sv
 DEC_BIN = obj_dir_dec/Vahb_decoder
 
-$(DEC_BIN): $(DEC_RTL) $(SIM_DIR)/tb_decoder.cpp
+$(DEC_BIN): $(DEC_RTL) $(TB_DIR)/tb_decoder.cpp
 	$(VERILATOR) --cc --exe --build -Wno-fatal \
 		--top-module ahb_decoder \
 		-Mdir obj_dir_dec \
-		$(DEC_RTL) $(SIM_DIR)/tb_decoder.cpp
+		$(DEC_RTL) $(TB_DIR)/tb_decoder.cpp
 
 test-decoder: $(DEC_BIN)
 	./$(DEC_BIN)
 
-.PHONY: all sim test sw clean remote-test remote-hello test-arbiter test-decoder hello remote-fpga fpga-reports remote-fpga-kr260 fpga-reports-kr260 remote-bitstream-kr260 firmware-mem
+# ---------------------------------------------------------------------------
+
+.PHONY: all sim test sw clean remote-test remote-hello test-arbiter test-decoder test-uart hello remote-fpga fpga-reports remote-fpga-kr260 fpga-reports-kr260 remote-bitstream-kr260 firmware-mem
 
 all: sim
 
@@ -113,16 +118,22 @@ test: $(SIM_BIN) $(SW_BINS) $(FW_BINS)
 
 sw: $(SW_BINS)
 
-clean:
-	rm -rf obj_dir $(SW_DIR)/*.elf $(SW_DIR)/*.bin $(SW_DIR)/*.vcd
+# CocoTB peripheral unit tests (run locally — no compile on test-only changes)
+test-uart:
+	cd $(TB_DIR) && nix-shell -p python313Packages.cocotb verilator --run "python3 test_uart.py"
 
+clean:
+	rm -rf obj_dir* sim_build $(SW_DIR)/*.elf $(SW_DIR)/*.bin $(SW_DIR)/*.vcd
+
+# ---------------------------------------------------------------------------
 # Remote test machine
+
 REMOTE_HOST = pc-nixos
 REMOTE_PATH = /data/rp2040-clone
 
 RSYNC_EXCLUDES = \
 	--exclude='.git' \
-	--exclude='obj_dir' \
+	--exclude='obj_dir*' \
 	--exclude='fpga/vivado' \
 	--exclude='fpga/vivado_kr260' \
 	--exclude='fpga/reports' \

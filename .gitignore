@@ -8,3 +8,7 @@ sim/sw/*.o
 fpga/bitstream
 fpga/reports*
 fpga/firmware.mem
+
+sim/tb/__pycache__/
+sim/tb/sim_build/
+sim/tb/results.xml

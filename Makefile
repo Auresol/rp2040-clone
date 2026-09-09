@@ -4,8 +4,8 @@ RISCV_OBJCOPY ?= riscv64-unknown-elf-objcopy
 
 TOP      = rvsoc_top
 RTL_DIR  = rtl
-SIM_DIR  = sim
-SW_DIR   = $(SIM_DIR)/sw
+TB_DIR   = sim/tb
+SW_DIR   = sim/sw
 
 HAZARD3_HDL = $(RTL_DIR)/core/hazard3/hdl
 
@@ -23,24 +23,30 @@ VERILATOR_FLAGS = \
 	-y $(RTL_DIR)/soc/peripheral \
 	-y $(RTL_DIR)/soc/peripheral/pio \
 	--top-module $(TOP)
-	
+
 SRC_RTL  = $(RTL_DIR)/soc/$(TOP).sv
-SIM_CPP  = $(SIM_DIR)/main.cpp
+SIM_CPP  = $(TB_DIR)/main.cpp
 SIM_BIN  = obj_dir/V$(TOP)
+
+# All SystemVerilog sources — simulator rebuilds when any .sv changes.
+RTL_SRCS = $(shell find $(RTL_DIR) -name "*.sv")
 
 GCC_FLAGS = -march=rv32imc_zicsr -mabi=ilp32 -nostartfiles -nostdlib -Ttext=0x0
 
 TESTS = hello test_alu test_mem test_branch test_gpio test_pio test_uart
 SW_BINS = $(addprefix $(SW_DIR)/, $(addsuffix .bin, $(TESTS)))
 
+# ---------------------------------------------------------------------------
+# Unit testbenches (standalone, no SoC)
+
 ARB_RTL = $(RTL_DIR)/soc/fabric/ahb_arbiter.sv
 ARB_BIN = obj_dir_arb/Vahb_arbiter
 
-$(ARB_BIN): $(ARB_RTL) $(SIM_DIR)/tb_arbiter.cpp
+$(ARB_BIN): $(ARB_RTL) $(TB_DIR)/tb_arbiter.cpp
 	$(VERILATOR) --cc --exe --build -Wno-fatal \
 		--top-module ahb_arbiter \
 		-Mdir obj_dir_arb \
-		$(ARB_RTL) $(SIM_DIR)/tb_arbiter.cpp
+		$(ARB_RTL) $(TB_DIR)/tb_arbiter.cpp
 
 test-arbiter: $(ARB_BIN)
 	./$(ARB_BIN)
@@ -48,21 +54,23 @@ test-arbiter: $(ARB_BIN)
 DEC_RTL = $(RTL_DIR)/soc/fabric/ahb_decoder.sv
 DEC_BIN = obj_dir_dec/Vahb_decoder
 
-$(DEC_BIN): $(DEC_RTL) $(SIM_DIR)/tb_decoder.cpp
+$(DEC_BIN): $(DEC_RTL) $(TB_DIR)/tb_decoder.cpp
 	$(VERILATOR) --cc --exe --build -Wno-fatal \
 		--top-module ahb_decoder \
 		-Mdir obj_dir_dec \
-		$(DEC_RTL) $(SIM_DIR)/tb_decoder.cpp
+		$(DEC_RTL) $(TB_DIR)/tb_decoder.cpp
 
 test-decoder: $(DEC_BIN)
 	./$(DEC_BIN)
+
+# ---------------------------------------------------------------------------
 
 .PHONY: all sim test sw clean remote-test test-arbiter test-decoder
 
 all: sim
 
-# Build the simulator (only recompiles if RTL or C++ changes)
-$(SIM_BIN): $(SRC_RTL) $(SIM_CPP)
+# Build the simulator (recompiles when any .sv or the sim driver changes)
+$(SIM_BIN): $(RTL_SRCS) $(SIM_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS) $(SRC_RTL) $(SIM_CPP)
 
 # Generic rules: .S -> .elf -> .bin
@@ -93,17 +101,20 @@ test: $(SIM_BIN) $(SW_BINS)
 sw: $(SW_BINS)
 
 clean:
-	rm -rf obj_dir $(SW_DIR)/*.elf $(SW_DIR)/*.bin dump.vcd
+	rm -rf obj_dir* $(SW_DIR)/*.elf $(SW_DIR)/*.bin
 
+# ---------------------------------------------------------------------------
 # Remote test machine
+
 REMOTE_HOST = pc-nixos
 REMOTE_PATH = /data/rp2040-clone
 
 remote-test:
 	rsync -av --delete \
 		--exclude='.git' \
-		--exclude='obj_dir' \
+		--exclude='obj_dir*' \
 		--exclude='$(SW_DIR)/*.elf' \
+		--exclude='$(SW_DIR)/waveform/*.vcd' \
 		--exclude='$(SW_DIR)/*.bin' \
 		. $(REMOTE_HOST):$(REMOTE_PATH)
 	ssh $(REMOTE_HOST) "cd $(REMOTE_PATH); env VERILATOR_ROOT=(verilator --getenv VERILATOR_ROOT) RISCV_GCC=(which riscv64-none-elf-gcc | get path | first) RISCV_OBJCOPY=(which riscv64-none-elf-objcopy | get path | first) make test"

@@ -4,18 +4,21 @@
 // Debug: JTAG DTM → DM → CPU debug port (RISC-V 0.13.2 debug spec)
 //
 // Instruction port: CPU0-I → i_dec → SRAM I port or XIP flash (via cache).
-// Data port:        CPU0-D → d_dec → SRAM D port, GPIO, PIO0, PIO1, UART0, or SPI0.
+// Data port:        CPU0-D → d_dec → SRAM D port + peripherals.
 //
 // Address map (instruction port):
 //   0x0000_0000 – 0x0000_FFFF  →  SRAM I port (64 KB)
 //   0x1000_0000 – 0x1FFF_FFFF  →  XIP flash (via cache → SPI 03h)
 //
 // Address map (data port):
-//   0x0000_0000 – 0x0000_FFFF  →  SRAM   (64 KB)
-//   0x4000_0000 – 0x4000_FFFF  →  GPIO   (32-bit output register)
-//   0x4003_0000 – 0x4003_3FFF  →  UART0  (base 0x4003_0000, PL011-compatible)
-//   0x4003_C000 – 0x4003_FFFF  →  SPI0   (base 0x4003_C000, PL022-compatible)
-//   0x4005_0000 – 0x4005_FFFF  →  TIMER  (base 0x4005_4000, RISC-V mtime)
+//   0x0000_0000 – 0x0000_FFFF  →  SRAM     (64 KB)
+//   0x4000_0000 – 0x4000_FFFF  →  GPIO     (32-bit output register)
+//   0x4003_0000 – 0x4003_3FFF  →  UART0    (PL011-compatible)
+//   0x4003_C000 – 0x4003_FFFF  →  SPI0     (PL022-compatible)
+//   0x4005_0000 – 0x4005_3FFF  →  TIMER    (RISC-V mtime)
+//   0x4005_4000 – 0x4005_7FFF  →  RESET    (reset controller)
+//   0x4005_8000 – 0x4005_BFFF  →  WATCHDOG
+//   0x4005_C000 – 0x4005_FFFF  →  SYSINFO  (read-only ID)
 //   0x5020_0000 – 0x5020_FFFF  →  PIO0
 //   0x5030_0000 – 0x5030_FFFF  →  PIO1
 
@@ -145,6 +148,38 @@ wire [1:0]  dec_timer_htrans;
 wire [2:0]  dec_timer_hsize;
 
 // ----------------------------------------------------------------------------
+// Decoder → WATCHDOG
+
+wire [31:0] dec_wdog_haddr,  dec_wdog_hwdata,  dec_wdog_hrdata;
+wire        dec_wdog_hwrite, dec_wdog_hready,  dec_wdog_hresp;
+wire [1:0]  dec_wdog_htrans;
+wire [2:0]  dec_wdog_hsize;
+
+// ----------------------------------------------------------------------------
+// Decoder → RESET CONTROLLER
+
+wire [31:0] dec_rstc_haddr,  dec_rstc_hwdata,  dec_rstc_hrdata;
+wire        dec_rstc_hwrite, dec_rstc_hready,  dec_rstc_hresp;
+wire [1:0]  dec_rstc_htrans;
+wire [2:0]  dec_rstc_hsize;
+
+// ----------------------------------------------------------------------------
+// Decoder → SYSINFO
+
+wire [31:0] dec_sysinfo_haddr,  dec_sysinfo_hwdata,  dec_sysinfo_hrdata;
+wire        dec_sysinfo_hwrite, dec_sysinfo_hready,  dec_sysinfo_hresp;
+wire [1:0]  dec_sysinfo_htrans;
+wire [2:0]  dec_sysinfo_hsize;
+
+// ----------------------------------------------------------------------------
+// Reset controller + watchdog signals
+
+wire        wdog_reset_out;    // watchdog timeout pulse
+wire        wdog_tick_1mhz;    // 1 MHz tick (future use)
+wire        rc_cpu_rst_n;      // reset controller CPU reset output
+wire [7:0]  periph_rst_n;      // per-peripheral reset outputs
+
+// ----------------------------------------------------------------------------
 // JTAG Debug: DTM → DM → CPU0
 
 // DMI APB bus (DTM ↔ DM)
@@ -201,8 +236,8 @@ reset_sync dmi_reset_sync (
     .rst_n_out (rst_n_dmi)
 );
 
-// CPU reset: external reset OR DM system/hart reset request
-wire assert_cpu_reset = !rst_n || sys_reset_req || hart_reset_req;
+// CPU reset: external reset OR DM system/hart reset request OR watchdog/reset-controller
+wire assert_cpu_reset = !rst_n || sys_reset_req || hart_reset_req || !rc_cpu_rst_n;
 wire rst_n_cpu;
 
 reset_sync cpu_reset_sync (
@@ -457,7 +492,34 @@ ahb_d_decoder d_dec (
     .s6_hwdata (dec_timer_hwdata),
     .s6_hrdata (dec_timer_hrdata),
     .s6_hready (dec_timer_hready),
-    .s6_hresp  (dec_timer_hresp)
+    .s6_hresp  (dec_timer_hresp),
+
+    .s7_haddr  (dec_wdog_haddr),
+    .s7_hwrite (dec_wdog_hwrite),
+    .s7_htrans (dec_wdog_htrans),
+    .s7_hsize  (dec_wdog_hsize),
+    .s7_hwdata (dec_wdog_hwdata),
+    .s7_hrdata (dec_wdog_hrdata),
+    .s7_hready (dec_wdog_hready),
+    .s7_hresp  (dec_wdog_hresp),
+
+    .s8_haddr  (dec_rstc_haddr),
+    .s8_hwrite (dec_rstc_hwrite),
+    .s8_htrans (dec_rstc_htrans),
+    .s8_hsize  (dec_rstc_hsize),
+    .s8_hwdata (dec_rstc_hwdata),
+    .s8_hrdata (dec_rstc_hrdata),
+    .s8_hready (dec_rstc_hready),
+    .s8_hresp  (dec_rstc_hresp),
+
+    .s9_haddr  (dec_sysinfo_haddr),
+    .s9_hwrite (dec_sysinfo_hwrite),
+    .s9_htrans (dec_sysinfo_htrans),
+    .s9_hsize  (dec_sysinfo_hsize),
+    .s9_hwdata (dec_sysinfo_hwdata),
+    .s9_hrdata (dec_sysinfo_hrdata),
+    .s9_hready (dec_sysinfo_hready),
+    .s9_hresp  (dec_sysinfo_hresp)
 );
 
 // ----------------------------------------------------------------------------
@@ -616,7 +678,7 @@ sram_top mem (
 
 gpio gpio0 (
     .clk      (clk),
-    .rst_n    (rst_n),
+    .rst_n    (periph_rst_n[0]),
     .haddr    (dec_gpio_haddr),
     .hwrite   (dec_gpio_hwrite),
     .htrans   (dec_gpio_htrans),
@@ -632,7 +694,7 @@ gpio gpio0 (
 
 pio_top pio0 (
     .clk      (clk),
-    .rst_n    (rst_n),
+    .rst_n    (periph_rst_n[1]),
     .haddr    (dec_pio0_haddr),
     .hwrite   (dec_pio0_hwrite),
     .htrans   (dec_pio0_htrans),
@@ -652,7 +714,7 @@ pio_top pio0 (
 
 pio_top pio1 (
     .clk      (clk),
-    .rst_n    (rst_n),
+    .rst_n    (periph_rst_n[2]),
     .haddr    (dec_pio1_haddr),
     .hwrite   (dec_pio1_hwrite),
     .htrans   (dec_pio1_htrans),
@@ -672,7 +734,7 @@ pio_top pio1 (
 
 uart uart0 (
     .clk      (clk),
-    .rst_n    (rst_n),
+    .rst_n    (periph_rst_n[3]),
     .haddr    (dec_uart0_haddr),
     .hwrite   (dec_uart0_hwrite),
     .htrans   (dec_uart0_htrans),
@@ -694,7 +756,7 @@ uart uart0 (
 
 spi spi0 (
     .clk      (clk),
-    .rst_n    (rst_n),
+    .rst_n    (periph_rst_n[4]),
     .haddr    (dec_spi0_haddr),
     .hwrite   (dec_spi0_hwrite),
     .htrans   (dec_spi0_htrans),
@@ -707,7 +769,8 @@ spi spi0 (
     .spi_mosi (spi0_mosi),
     .spi_miso (spi0_miso),
     .spi_cs_n (spi0_cs_n),
-    .spi_irq  (spi0_irq)
+    .spi_irq  (spi0_irq),
+    .spi_dreq ()              // DMA request — not wired yet
 );
 
 // ----------------------------------------------------------------------------
@@ -717,7 +780,7 @@ wire timer_irq;
 
 timer timer0 (
     .clk       (clk),
-    .rst_n     (rst_n),
+    .rst_n     (periph_rst_n[5]),
     .haddr     (dec_timer_haddr),
     .hwrite    (dec_timer_hwrite),
     .htrans    (dec_timer_htrans),
@@ -728,6 +791,66 @@ timer timer0 (
     .hresp     (dec_timer_hresp),
     .dbg_halt  (1'b0),
     .timer_irq (timer_irq)
+);
+
+// ----------------------------------------------------------------------------
+// Watchdog (base 0x4005_8000)
+
+watchdog #(
+    .CLK_HZ (100_000_000)
+) wdog0 (
+    .clk       (clk),
+    .rst_n     (rst_n),          // POR only — survives watchdog resets
+    .haddr     (dec_wdog_haddr),
+    .hwrite    (dec_wdog_hwrite),
+    .htrans    (dec_wdog_htrans),
+    .hsize     (dec_wdog_hsize),
+    .hwdata    (dec_wdog_hwdata),
+    .hrdata    (dec_wdog_hrdata),
+    .hready    (dec_wdog_hready),
+    .hresp     (dec_wdog_hresp),
+    .dbg_halt  (1'b0),
+    .wdog_reset (wdog_reset_out),
+    .tick_1mhz  (wdog_tick_1mhz)
+);
+
+// ----------------------------------------------------------------------------
+// Reset controller (base 0x4005_4000)
+
+reset_controller rstc0 (
+    .clk         (clk),
+    .por_n       (rst_n),        // POR only — raw top-level reset
+    .haddr       (dec_rstc_haddr),
+    .hwrite      (dec_rstc_hwrite),
+    .htrans      (dec_rstc_htrans),
+    .hsize       (dec_rstc_hsize),
+    .hwdata      (dec_rstc_hwdata),
+    .hrdata      (dec_rstc_hrdata),
+    .hready      (dec_rstc_hready),
+    .hresp       (dec_rstc_hresp),
+    .wdog_reset  (wdog_reset_out),
+    .cpu_rst_n   (rc_cpu_rst_n),
+    .periph_rst_n (periph_rst_n)
+);
+
+// ----------------------------------------------------------------------------
+// Sysinfo (base 0x4005_C000)
+
+sysinfo #(
+    .CHIP_ID  (32'h5250_5332),   // "RPS2"
+    .PLATFORM (32'h0000_0001),   // 1 = FPGA
+    .GITREV   (32'h0000_0000)
+) sysinfo0 (
+    .clk      (clk),
+    .rst_n    (rst_n),           // POR only
+    .haddr    (dec_sysinfo_haddr),
+    .hwrite   (dec_sysinfo_hwrite),
+    .htrans   (dec_sysinfo_htrans),
+    .hsize    (dec_sysinfo_hsize),
+    .hwdata   (dec_sysinfo_hwdata),
+    .hrdata   (dec_sysinfo_hrdata),
+    .hready   (dec_sysinfo_hready),
+    .hresp    (dec_sysinfo_hresp)
 );
 
 endmodule

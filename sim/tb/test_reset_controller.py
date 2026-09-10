@@ -61,45 +61,50 @@ async def reset(dut):
 
 @cocotb.test()
 async def test_por_defaults(dut):
-    """After POR, all peripherals are in reset, reason=POR."""
+    """After POR, all peripherals are released (FPGA default), reason=POR."""
     await reset(dut)
 
     reset_reg = await ahb_read(dut, RESET)
-    assert reset_reg == 0xFF, f"all peripherals should be in reset, got 0x{reset_reg:02x}"
+    assert reset_reg == 0x00, f"all peripherals should be released (FPGA default), got 0x{reset_reg:02x}"
 
     done = await ahb_read(dut, RESET_DONE)
-    assert done == 0x00, f"no peripheral should be running, got 0x{done:02x}"
+    assert done == 0xFF, f"all peripherals should be running, got 0x{done:02x}"
 
     reason = await ahb_read(dut, REASON)
     assert reason & 1, f"POR reason bit should be set, got 0x{reason:x}"
 
 
 @cocotb.test()
-async def test_release_single_peripheral(dut):
-    """Releasing one peripheral from reset."""
+async def test_assert_single_peripheral(dut):
+    """Asserting reset on one peripheral."""
     await reset(dut)
 
-    # Release bit 3 (UART0)
-    await ahb_write(dut, RESET, 0xF7)  # clear bit 3
+    # Assert reset on bit 3 (UART0)
+    await ahb_write(dut, RESET, 0x08)
 
     reset_reg = await ahb_read(dut, RESET)
-    assert reset_reg == 0xF7, f"expected 0xF7, got 0x{reset_reg:02x}"
+    assert reset_reg == 0x08, f"expected 0x08, got 0x{reset_reg:02x}"
 
     done = await ahb_read(dut, RESET_DONE)
-    assert done == 0x08, f"only bit 3 should be done, got 0x{done:02x}"
+    assert done == 0xF7, f"all but bit 3 should be done, got 0x{done:02x}"
 
     # Check output pin
     periph = int(dut.periph_rst_n.value)
-    assert periph & (1 << 3), f"periph_rst_n[3] should be deasserted, got 0x{periph:02x}"
+    assert not (periph & (1 << 3)), f"periph_rst_n[3] should be asserted, got 0x{periph:02x}"
 
 
 @cocotb.test()
-async def test_release_all_peripherals(dut):
-    """Releasing all peripherals from reset."""
+async def test_assert_then_release_all(dut):
+    """Assert reset on all, then release."""
     await reset(dut)
 
-    await ahb_write(dut, RESET, 0x00)
+    # Assert all
+    await ahb_write(dut, RESET, 0xFF)
+    done = await ahb_read(dut, RESET_DONE)
+    assert done == 0x00, f"none should be running, got 0x{done:02x}"
 
+    # Release all
+    await ahb_write(dut, RESET, 0x00)
     done = await ahb_read(dut, RESET_DONE)
     assert done == 0xFF, f"all should be running, got 0x{done:02x}"
 
@@ -109,14 +114,10 @@ async def test_release_all_peripherals(dut):
 
 @cocotb.test()
 async def test_reassert_reset(dut):
-    """Can re-assert reset on a running peripheral."""
+    """Can assert reset on a running peripheral."""
     await reset(dut)
 
-    # Release all
-    await ahb_write(dut, RESET, 0x00)
-    await ClockCycles(dut.clk, 2)
-
-    # Re-assert reset on SPI (bit 4)
+    # All running by default, assert reset on SPI (bit 4)
     await ahb_write(dut, RESET, 0x10)
 
     reset_reg = await ahb_read(dut, RESET)
@@ -131,10 +132,7 @@ async def test_watchdog_resets_all(dut):
     """Watchdog timeout re-asserts all peripheral resets."""
     await reset(dut)
 
-    # Release all peripherals
-    await ahb_write(dut, RESET, 0x00)
-    await ClockCycles(dut.clk, 2)
-
+    # All running by default
     done = await ahb_read(dut, RESET_DONE)
     assert done == 0xFF, f"all should be running before wdog, got 0x{done:02x}"
 
@@ -178,10 +176,6 @@ async def test_watchdog_resets_cpu(dut):
 async def test_software_chip_reset(dut):
     """Writing CHIP_RESET re-asserts all resets."""
     await reset(dut)
-
-    # Release all
-    await ahb_write(dut, RESET, 0x00)
-    await ClockCycles(dut.clk, 2)
 
     # Software chip reset
     await ahb_write(dut, CHIP_RESET, 1)

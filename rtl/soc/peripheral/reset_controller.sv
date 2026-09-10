@@ -85,7 +85,8 @@ wire wr = active_r && hwrite_r;
 
 always @(posedge clk or negedge por_n) begin
     if (!por_n) begin
-        reset_reg      <= 8'hFF;    // all peripherals in reset
+        reset_reg      <= 8'h00;    // all peripherals released (FPGA default)
+                                    // TODO: change to 8'hFF for ASIC boot sequence
         reason         <= 3'b001;   // POR reason set
         chip_reset_req <= 1'b0;
     end else begin

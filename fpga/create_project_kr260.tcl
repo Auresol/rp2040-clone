@@ -82,6 +82,14 @@ read_verilog -sv [glob $REPO_ROOT/rtl/soc/peripheral/pio/*.sv]
 read_verilog [glob $REPO_ROOT/rtl/core/hazard3/hdl/*.v]
 read_verilog [glob $REPO_ROOT/rtl/core/hazard3/hdl/arith/*.v]
 
+# Hazard3 debug (JTAG DTM, DM, CDC)
+read_verilog [glob $REPO_ROOT/rtl/core/hazard3/hdl/debug/dtm/*.v]
+read_verilog [glob $REPO_ROOT/rtl/core/hazard3/hdl/debug/dm/*.v]
+read_verilog [glob $REPO_ROOT/rtl/core/hazard3/hdl/debug/cdc/*.v]
+
+# reset_sync (used by DTM/DM reset logic)
+read_verilog $REPO_ROOT/rtl/core/hazard3/example_soc/libfpga/common/reset_sync.v
+
 # FPGA wrappers (ps_bd_wrapper is auto-generated, already in fileset from generate_target)
 read_verilog -sv $REPO_ROOT/fpga/fpga_top_kr260.sv
 read_verilog -sv $REPO_ROOT/fpga/kr260_top.sv

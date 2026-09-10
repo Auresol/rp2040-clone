@@ -3,7 +3,7 @@ RISCV_GCC     ?= riscv64-none-elf-gcc
 RISCV_OBJCOPY ?= riscv64-none-elf-objcopy
 VIVADO        ?= /tools/xillinx/2025.2/Vivado/bin/vivado
 
-TOP      = rvsoc_top
+TOP      = rxpio32
 RTL_DIR  = rtl
 TB_DIR   = sim/tb
 SW_DIR   = sim/sw
@@ -19,10 +19,14 @@ VERILATOR_FLAGS = \
 	--public-flat-rw \
 	-I$(HAZARD3_HDL) \
 	-y $(HAZARD3_HDL)/arith \
+	-y $(HAZARD3_HDL)/debug/dtm \
+	-y $(HAZARD3_HDL)/debug/dm \
+	-y $(HAZARD3_HDL)/debug/cdc \
 	-y $(RTL_DIR)/soc/fabric \
 	-y $(RTL_DIR)/soc/memory \
 	-y $(RTL_DIR)/soc/peripheral \
 	-y $(RTL_DIR)/soc/peripheral/pio \
+	-y rtl/core/hazard3/example_soc/libfpga/common \
 	--top-module $(TOP)
 
 SRC_RTL  = $(RTL_DIR)/soc/$(TOP).sv

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-OpenLane parallel grid explorer for rvsoc_top.
+OpenLane parallel grid explorer for rxpio32.
 Run from inside the OpenLane Docker container:
     python3 /openlane/designs/rvsoc/explore.py
 
@@ -25,7 +25,7 @@ DESIGN_DIR   = OPENLANE_DIR / "designs" / DESIGN
 # ── Base config (fixed across all runs) ───────────────────────────────────────
 
 BASE = {
-    "DESIGN_NAME":            "rvsoc_top",
+    "DESIGN_NAME":            "rxpio32",
     "VERILOG_FILES":          ["dir::src/*.v", "dir::src/*.sv"],
     "VERILOG_FILES_BLACKBOX": "dir::bb/sram_bank.sv",
     "VERILOG_INCLUDE_DIRS":   "dir::src",
@@ -175,7 +175,7 @@ def main():
     if successes:
         for r in successes:
             print(f"  SUCCESS  {r['tag']}  {r['label']}")
-            gds = DESIGN_DIR / "runs" / r["tag"] / "results" / "final" / "gds" / "rvsoc_top.gds"
+            gds = DESIGN_DIR / "runs" / r["tag"] / "results" / "final" / "gds" / "rxpio32.gds"
             print(f"    GDS     → {gds}")
             rpt = DESIGN_DIR / "runs" / r["tag"] / "reports"
             print(f"    Reports → {rpt}")

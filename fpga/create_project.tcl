@@ -1,4 +1,4 @@
-# create_project.tcl — creates Vivado project for rvsoc_top on Basys3
+# create_project.tcl — creates Vivado project for rxpio32 on Basys3
 # Usage: vivado -mode batch -source fpga/create_project.tcl
 # Run from repo root: /data/rp2040-clone
 
@@ -21,6 +21,14 @@ read_verilog -sv [glob $REPO_ROOT/rtl/soc/peripheral/pio/*.sv]
 # Hazard3 core (plain Verilog)
 read_verilog [glob $REPO_ROOT/rtl/core/hazard3/hdl/*.v]
 read_verilog [glob $REPO_ROOT/rtl/core/hazard3/hdl/arith/*.v]
+
+# Hazard3 debug (JTAG DTM, DM, CDC)
+read_verilog [glob $REPO_ROOT/rtl/core/hazard3/hdl/debug/dtm/*.v]
+read_verilog [glob $REPO_ROOT/rtl/core/hazard3/hdl/debug/dm/*.v]
+read_verilog [glob $REPO_ROOT/rtl/core/hazard3/hdl/debug/cdc/*.v]
+
+# reset_sync (used by DTM/DM reset logic)
+read_verilog $REPO_ROOT/rtl/core/hazard3/example_soc/libfpga/common/reset_sync.v
 
 # FPGA top wrapper
 read_verilog -sv $REPO_ROOT/fpga/fpga_top.sv

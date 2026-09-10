@@ -1,4 +1,7 @@
-// Single-core SoC with bus fabric.
+// rxpio32 — Single-core RISC-V SoC with JTAG debug.
+//
+// CPU:   Hazard3 (RV32IMC), single hart
+// Debug: JTAG DTM → DM → CPU debug port (RISC-V 0.13.2 debug spec)
 //
 // Instruction port: CPU0-I → i_dec → SRAM I port.
 // Data port:        CPU0-D → d_dec → SRAM D port, GPIO, PIO0, PIO1, or UART0.
@@ -9,15 +12,19 @@
 //   0x4003_0000 – 0x4003_FFFF  →  UART0  (base 0x4003_4000, PL011-compatible)
 //   0x5020_0000 – 0x5020_FFFF  →  PIO0
 //   0x5030_0000 – 0x5030_FFFF  →  PIO1
-//
-// No arbiter: single core connects directly to decoders.
-// Debug and interrupt inputs are tied off.
 
 `default_nettype none
 
-module rvsoc_top (
+module rxpio32 (
     input  wire        clk,
     input  wire        rst_n,
+
+    // JTAG debug port
+    input  wire        tck,
+    input  wire        trst_n,
+    input  wire        tms,
+    input  wire        tdi,
+    output wire        tdo,
 
     // Simple GPIO output (backward-compatible with existing tests)
     output wire [31:0] gpio_out,
@@ -104,6 +111,150 @@ wire [1:0]  dec_uart0_htrans;
 wire [2:0]  dec_uart0_hsize;
 
 // ----------------------------------------------------------------------------
+// JTAG Debug: DTM → DM → CPU0
+
+// DMI APB bus (DTM ↔ DM)
+wire        dmi_psel;
+wire        dmi_penable;
+wire        dmi_pwrite;
+wire [8:0]  dmi_paddr;
+wire [31:0] dmi_pwdata;
+wire [31:0] dmi_prdata;
+wire        dmi_pready;
+wire        dmi_pslverr;
+
+// DM ↔ CPU0 debug signals
+wire        hart_req_halt;
+wire        hart_req_halt_on_reset;
+wire        hart_req_resume;
+wire        hart_halted;
+wire        hart_running;
+wire [31:0] hart_data0_rdata;
+wire [31:0] hart_data0_wdata;
+wire        hart_data0_wen;
+wire [31:0] hart_instr_data;
+wire        hart_instr_data_vld;
+wire        hart_instr_data_rdy;
+wire        hart_instr_caught_exception;
+wire        hart_instr_caught_ebreak;
+
+// DM system bus access (unused — tied off)
+wire [31:0] sbus_addr;
+wire        sbus_write;
+wire [1:0]  sbus_size;
+wire        sbus_vld;
+wire        sbus_rdy;
+wire        sbus_err;
+wire [31:0] sbus_wdata;
+wire [31:0] sbus_rdata;
+
+assign sbus_rdy  = 1'b0;
+assign sbus_err  = 1'b0;
+assign sbus_rdata = 32'h0;
+
+// DM reset control
+wire        sys_reset_req;
+wire        hart_reset_req;
+
+// DMI domain reset: hard-reset request from TCK domain OR external reset
+wire dmihardreset_req;
+wire assert_dmi_reset = !rst_n || dmihardreset_req;
+wire rst_n_dmi;
+
+reset_sync dmi_reset_sync (
+    .clk       (clk),
+    .rst_n_in  (!assert_dmi_reset),
+    .rst_n_out (rst_n_dmi)
+);
+
+// CPU reset: external reset OR DM system/hart reset request
+wire assert_cpu_reset = !rst_n || sys_reset_req || hart_reset_req;
+wire rst_n_cpu;
+
+reset_sync cpu_reset_sync (
+    .clk       (clk),
+    .rst_n_in  (!assert_cpu_reset),
+    .rst_n_out (rst_n_cpu)
+);
+
+// Reset done feedback to DM (active-high = out of reset)
+wire sys_reset_done  = rst_n_cpu;
+wire hart_reset_done = rst_n_cpu;
+
+// DTM: JTAG TAP → DMI APB bus
+hazard3_jtag_dtm #(
+    .IDCODE (32'hdeadbeef)
+) dtm (
+    .tck              (tck),
+    .trst_n           (trst_n),
+    .tms              (tms),
+    .tdi              (tdi),
+    .tdo              (tdo),
+
+    .dmihardreset_req (dmihardreset_req),
+
+    .clk_dmi          (clk),
+    .rst_n_dmi        (rst_n_dmi),
+
+    .dmi_psel         (dmi_psel),
+    .dmi_penable      (dmi_penable),
+    .dmi_pwrite       (dmi_pwrite),
+    .dmi_paddr        (dmi_paddr),
+    .dmi_pwdata       (dmi_pwdata),
+    .dmi_prdata       (dmi_prdata),
+    .dmi_pready       (dmi_pready),
+    .dmi_pslverr      (dmi_pslverr)
+);
+
+// DM: DMI APB bus → per-hart debug signals
+hazard3_dm #(
+    .N_HARTS  (1),
+    .HAVE_SBA (0)
+) dm (
+    .clk                         (clk),
+    .rst_n                       (rst_n),
+
+    .dmi_psel                    (dmi_psel),
+    .dmi_penable                 (dmi_penable),
+    .dmi_pwrite                  (dmi_pwrite),
+    .dmi_paddr                   (dmi_paddr),
+    .dmi_pwdata                  (dmi_pwdata),
+    .dmi_prdata                  (dmi_prdata),
+    .dmi_pready                  (dmi_pready),
+    .dmi_pslverr                 (dmi_pslverr),
+
+    .sys_reset_req               (sys_reset_req),
+    .sys_reset_done              (sys_reset_done),
+    .hart_reset_req              (hart_reset_req),
+    .hart_reset_done             (hart_reset_done),
+
+    .hart_req_halt               (hart_req_halt),
+    .hart_req_halt_on_reset      (hart_req_halt_on_reset),
+    .hart_req_resume             (hart_req_resume),
+    .hart_halted                 (hart_halted),
+    .hart_running                (hart_running),
+
+    .hart_data0_rdata            (hart_data0_rdata),
+    .hart_data0_wdata            (hart_data0_wdata),
+    .hart_data0_wen              (hart_data0_wen),
+
+    .hart_instr_data             (hart_instr_data),
+    .hart_instr_data_vld         (hart_instr_data_vld),
+    .hart_instr_data_rdy         (hart_instr_data_rdy),
+    .hart_instr_caught_exception (hart_instr_caught_exception),
+    .hart_instr_caught_ebreak    (hart_instr_caught_ebreak),
+
+    .sbus_addr                   (sbus_addr),
+    .sbus_write                  (sbus_write),
+    .sbus_size                   (sbus_size),
+    .sbus_vld                    (sbus_vld),
+    .sbus_rdy                    (sbus_rdy),
+    .sbus_err                    (sbus_err),
+    .sbus_wdata                  (sbus_wdata),
+    .sbus_rdata                  (sbus_rdata)
+);
+
+// ----------------------------------------------------------------------------
 // PIO GPIO signals (merged from PIO0 and PIO1; PIO1 has higher priority)
 
 wire [31:0] pio0_gpio_out, pio0_gpio_oe;
@@ -122,7 +273,7 @@ assign pio_irq      = {pio1_irq, pio0_irq};
 hazard3_cpu_2port cpu0 (
     .clk           (clk),
     .clk_always_on (clk),
-    .rst_n         (rst_n),
+    .rst_n         (rst_n_cpu),
 
     .pwrup_req     (),
     .pwrup_ack     (1'b1),
@@ -162,27 +313,28 @@ hazard3_cpu_2port cpu0 (
     .fence_d_vld   (),
     .fence_rdy     (1'b1),
 
-    .dbg_req_halt          (1'b0),
-    .dbg_req_halt_on_reset (1'b0),
-    .dbg_req_resume        (1'b0),
-    .dbg_halted            (),
-    .dbg_running           (),
-    .dbg_data0_rdata       (32'h0),
-    .dbg_data0_wdata       (),
-    .dbg_data0_wen         (),
-    .dbg_instr_data        (32'h0),
-    .dbg_instr_data_vld    (1'b0),
-    .dbg_instr_data_rdy    (),
-    .dbg_instr_caught_exception (),
-    .dbg_instr_caught_ebreak    (),
-    .dbg_sbus_addr         (32'h0),
-    .dbg_sbus_write        (1'b0),
-    .dbg_sbus_size         (2'h0),
-    .dbg_sbus_vld          (1'b0),
-    .dbg_sbus_rdy          (),
-    .dbg_sbus_err          (),
-    .dbg_sbus_wdata        (32'h0),
-    .dbg_sbus_rdata        (),
+    // Debug port — wired to DM
+    .dbg_req_halt               (hart_req_halt),
+    .dbg_req_halt_on_reset      (hart_req_halt_on_reset),
+    .dbg_req_resume             (hart_req_resume),
+    .dbg_halted                 (hart_halted),
+    .dbg_running                (hart_running),
+    .dbg_data0_rdata            (hart_data0_rdata),
+    .dbg_data0_wdata            (hart_data0_wdata),
+    .dbg_data0_wen              (hart_data0_wen),
+    .dbg_instr_data             (hart_instr_data),
+    .dbg_instr_data_vld         (hart_instr_data_vld),
+    .dbg_instr_data_rdy         (hart_instr_data_rdy),
+    .dbg_instr_caught_exception (hart_instr_caught_exception),
+    .dbg_instr_caught_ebreak    (hart_instr_caught_ebreak),
+    .dbg_sbus_addr              (sbus_addr),
+    .dbg_sbus_write             (sbus_write),
+    .dbg_sbus_size              (sbus_size),
+    .dbg_sbus_vld               (sbus_vld),
+    .dbg_sbus_rdy               (sbus_rdy),
+    .dbg_sbus_err               (sbus_err),
+    .dbg_sbus_wdata             (sbus_wdata),
+    .dbg_sbus_rdata             (sbus_rdata),
 
     .mhartid_val   (32'h0),
     .eco_version    (4'h0),

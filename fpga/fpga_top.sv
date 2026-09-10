@@ -1,6 +1,6 @@
 `default_nettype none
 
-// Basys3 top-level wrapper for rvsoc_top.
+// Basys3 top-level wrapper for rxpio32.
 // Clock: 100 MHz onboard oscillator (W5)
 // Reset: btnC (T17), active-high → inverted to rst_n
 // GPIO:  gpio_out[15:0] → LD15:LD0
@@ -22,14 +22,27 @@ wire [7:0]  pio_irq;
 
 assign led = gpio_out[15:0];
 
-rvsoc_top soc (
+rxpio32 soc (
     .clk          (clk),
     .rst_n        (rst_n),
+
+    // JTAG debug — tied off (no external debugger in this build)
+    .tck          (1'b0),
+    .trst_n       (1'b1),
+    .tms          (1'b1),
+    .tdi          (1'b0),
+    .tdo          (),
+
     .gpio_out     (gpio_out),
     .pio_gpio_in  ({16'b0, sw}),
     .pio_gpio_out (pio_gpio_out),
     .pio_gpio_oe  (pio_gpio_oe),
-    .pio_irq      (pio_irq)
+    .pio_irq      (pio_irq),
+
+    // UART — unused on Basys3 for now
+    .uart_tx      (),
+    .uart_rx      (1'b1),
+
 );
 
 endmodule

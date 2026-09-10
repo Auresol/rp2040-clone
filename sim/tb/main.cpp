@@ -1,7 +1,7 @@
-#include "Vrvsoc_top.h"
-#include "Vrvsoc_top_rvsoc_top.h"
-#include "Vrvsoc_top_sram_top.h"
-#include "Vrvsoc_top_sram_bank.h"
+#include "Vrxpio32.h"
+#include "Vrxpio32_rxpio32.h"
+#include "Vrxpio32_sram_top.h"
+#include "Vrxpio32_sram_bank.h"
 #include "verilated.h"
 #include "verilated_vcd_c.h"
 #include <cstdio>
@@ -11,7 +11,7 @@ static const uint32_t SENTINEL_ADDR  = 0x00003ffc;
 static const uint32_t SENTINEL_VALUE = 0xdeadbeef;
 static const int      MAX_CYCLES     = 2000;
 
-static void load_firmware(Vrvsoc_top *dut, const char *path) {
+static void load_firmware(Vrxpio32 *dut, const char *path) {
     FILE *f = fopen(path, "rb");
     if (!f) {
         fprintf(stderr, "FATAL: cannot open firmware '%s'\n", path);
@@ -20,7 +20,7 @@ static void load_firmware(Vrvsoc_top *dut, const char *path) {
     uint8_t buf[4];
     int idx = 0;
     while (fread(buf, 1, 4, f) == 4) {
-        dut->rvsoc_top->mem->bank->sram[idx++] =
+        dut->rxpio32->mem->bank->sram[idx++] =
             (uint32_t)buf[0]         |
             ((uint32_t)buf[1] <<  8) |
             ((uint32_t)buf[2] << 16) |
@@ -36,7 +36,7 @@ int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
     Verilated::traceEverOn(true);
 
-    Vrvsoc_top *dut = new Vrvsoc_top;
+    Vrxpio32 *dut = new Vrxpio32;
 
     load_firmware(dut, firmware);
 
@@ -49,6 +49,12 @@ int main(int argc, char **argv) {
 
     // UART RX idle-high (no incoming data in simulation)
     dut->uart_rx = 1;
+
+    // JTAG idle (no debugger attached in simulation)
+    dut->tck    = 0;
+    dut->trst_n = 1;
+    dut->tms    = 1;  // TMS=1 keeps TAP in Test-Logic-Reset
+    dut->tdi    = 0;
 
     // Reset
     dut->rst_n = 0;
@@ -64,7 +70,7 @@ int main(int argc, char **argv) {
         dut->clk = 0; dut->eval(); tfp->dump(cycle * 2 + 5);
     }
 
-    uint32_t val = dut->rvsoc_top->mem->bank->sram[0xfff];
+    uint32_t val = dut->rxpio32->mem->bank->sram[0xfff];
     bool pass = (val == SENTINEL_VALUE);
     printf("%s: %s\n", firmware, pass ? "PASS" : "FAIL");
     if (!pass)

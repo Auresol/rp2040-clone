@@ -35,14 +35,27 @@ wire [31:0] pio_gpio_out;
 wire [31:0] pio_gpio_oe;
 wire [7:0]  pio_irq;
 
-rvsoc_top soc (
+rxpio32 soc (
     .clk          (clk),
     .rst_n        (rst_n_sync),
+
+    // JTAG debug — tied off (no external debugger in this build)
+    .tck          (1'b0),
+    .trst_n       (1'b1),
+    .tms          (1'b1),
+    .tdi          (1'b0),
+    .tdo          (),
+
     .gpio_out     (gpio_out),
     .pio_gpio_in  (32'b0),
     .pio_gpio_out (pio_gpio_out),
     .pio_gpio_oe  (pio_gpio_oe),
-    .pio_irq      (pio_irq)
+    .pio_irq      (pio_irq),
+
+    // UART — unused for now
+    .uart_tx      (),
+    .uart_rx      (1'b1),
+
 );
 
 // Per-bit mux: PIO output-enable takes priority over GPIO peripheral.

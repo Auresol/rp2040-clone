@@ -69,12 +69,12 @@ $(ARB_BIN): $(ARB_RTL) $(TB_DIR)/tb_arbiter.cpp
 test-arbiter: $(ARB_BIN)
 	./$(ARB_BIN)
 
-DEC_RTL = $(RTL_DIR)/soc/fabric/ahb_decoder.sv
-DEC_BIN = obj_dir_dec/Vahb_decoder
+DEC_RTL = $(RTL_DIR)/soc/fabric/ahb_i_decoder.sv
+DEC_BIN = obj_dir_dec/Vahb_i_decoder
 
 $(DEC_BIN): $(DEC_RTL) $(TB_DIR)/tb_decoder.cpp
 	$(VERILATOR) --cc --exe --build -Wno-fatal \
-		--top-module ahb_decoder \
+		--top-module ahb_i_decoder \
 		-Mdir obj_dir_dec \
 		$(DEC_RTL) $(TB_DIR)/tb_decoder.cpp
 

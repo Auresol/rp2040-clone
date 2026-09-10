@@ -347,7 +347,7 @@ hazard3_cpu_2port cpu0 (
 // ----------------------------------------------------------------------------
 // Data-port decoder: routes CPU0-D directly to SRAM, GPIO, PIO0, PIO1, or UART0
 
-ahb_decoder_5s d_dec (
+ahb_d_decoder d_dec (
     .clk       (clk),
     .rst_n     (rst_n),
 
@@ -410,7 +410,7 @@ ahb_decoder_5s d_dec (
 // Instruction-port decoder: routes CPU0-I directly to SRAM I port.
 // s1 reserved for future fetch targets; tied off.
 
-ahb_decoder i_dec (
+ahb_i_decoder i_dec (
     .clk       (clk),
     .rst_n     (rst_n),
 

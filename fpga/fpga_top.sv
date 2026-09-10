@@ -47,7 +47,13 @@ rxpsm32 soc (
     .spi_cs_n     (),
     .spi_sck      (),
     .spi_mosi     (),
-    .spi_miso     (1'b0)
+    .spi_miso     (1'b0),
+
+    // SPI0 — tied off (no SPI slave attached in this build)
+    .spi0_sclk    (),
+    .spi0_mosi    (),
+    .spi0_miso    (1'b0),
+    .spi0_cs_n    ()
 );
 
 endmodule

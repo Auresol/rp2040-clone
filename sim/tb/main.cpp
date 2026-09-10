@@ -59,6 +59,9 @@ int main(int argc, char **argv) {
     // SPI flash — no flash attached in simulation
     dut->spi_miso = 0;
 
+    // SPI0 — no slave attached in simulation
+    dut->spi0_miso = 0;
+
     // Reset
     dut->rst_n = 0;
     dut->clk   = 0;

@@ -4,7 +4,7 @@
 // Debug: JTAG DTM → DM → CPU debug port (RISC-V 0.13.2 debug spec)
 //
 // Instruction port: CPU0-I → i_dec → SRAM I port or XIP flash (via cache).
-// Data port:        CPU0-D → d_dec → SRAM D port, GPIO, PIO0, PIO1, or UART0.
+// Data port:        CPU0-D → d_dec → SRAM D port, GPIO, PIO0, PIO1, UART0, or SPI0.
 //
 // Address map (instruction port):
 //   0x0000_0000 – 0x0000_FFFF  →  SRAM I port (64 KB)
@@ -13,7 +13,8 @@
 // Address map (data port):
 //   0x0000_0000 – 0x0000_FFFF  →  SRAM   (64 KB)
 //   0x4000_0000 – 0x4000_FFFF  →  GPIO   (32-bit output register)
-//   0x4003_0000 – 0x4003_FFFF  →  UART0  (base 0x4003_4000, PL011-compatible)
+//   0x4003_0000 – 0x4003_3FFF  →  UART0  (base 0x4003_0000, PL011-compatible)
+//   0x4003_C000 – 0x4003_FFFF  →  SPI0   (base 0x4003_C000, PL022-compatible)
 //   0x5020_0000 – 0x5020_FFFF  →  PIO0
 //   0x5030_0000 – 0x5030_FFFF  →  PIO1
 
@@ -49,7 +50,13 @@ module rxpsm32 (
     output wire        spi_cs_n,
     output wire        spi_sck,
     output wire        spi_mosi,
-    input  wire        spi_miso
+    input  wire        spi_miso,
+
+    // SPI0 general-purpose master
+    output wire        spi0_sclk,
+    output wire        spi0_mosi,
+    input  wire        spi0_miso,
+    output wire        spi0_cs_n
 );
 
 // ----------------------------------------------------------------------------
@@ -119,6 +126,14 @@ wire [31:0] dec_uart0_haddr,  dec_uart0_hwdata,  dec_uart0_hrdata;
 wire        dec_uart0_hwrite, dec_uart0_hready,  dec_uart0_hresp;
 wire [1:0]  dec_uart0_htrans;
 wire [2:0]  dec_uart0_hsize;
+
+// ----------------------------------------------------------------------------
+// Decoder → SPI0
+
+wire [31:0] dec_spi0_haddr,  dec_spi0_hwdata,  dec_spi0_hrdata;
+wire        dec_spi0_hwrite, dec_spi0_hready,  dec_spi0_hresp;
+wire [1:0]  dec_spi0_htrans;
+wire [2:0]  dec_spi0_hsize;
 
 // ----------------------------------------------------------------------------
 // JTAG Debug: DTM → DM → CPU0
@@ -271,6 +286,7 @@ wire [31:0] pio0_gpio_out, pio0_gpio_oe;
 wire [31:0] pio1_gpio_out, pio1_gpio_oe;
 wire [3:0]  pio0_irq, pio1_irq;
 wire        uart0_irq;
+wire        spi0_irq;
 
 // Per-bit priority mux: PIO1 overrides PIO0 when PIO1 has OE
 assign pio_gpio_out = (pio1_gpio_oe & pio1_gpio_out) |
@@ -350,7 +366,7 @@ hazard3_cpu_2port cpu0 (
     .mhartid_val   (32'h0),
     .eco_version    (4'h0),
 
-    .irq           (uart0_irq),
+    .irq           (uart0_irq | spi0_irq),
     .soft_irq      (1'b0),
     .timer_irq     (1'b0)
 );
@@ -414,7 +430,16 @@ ahb_d_decoder d_dec (
     .s4_hwdata (dec_uart0_hwdata),
     .s4_hrdata (dec_uart0_hrdata),
     .s4_hready (dec_uart0_hready),
-    .s4_hresp  (dec_uart0_hresp)
+    .s4_hresp  (dec_uart0_hresp),
+
+    .s5_haddr  (dec_spi0_haddr),
+    .s5_hwrite (dec_spi0_hwrite),
+    .s5_htrans (dec_spi0_htrans),
+    .s5_hsize  (dec_spi0_hsize),
+    .s5_hwdata (dec_spi0_hwdata),
+    .s5_hrdata (dec_spi0_hrdata),
+    .s5_hready (dec_spi0_hready),
+    .s5_hresp  (dec_spi0_hresp)
 );
 
 // ----------------------------------------------------------------------------
@@ -641,6 +666,27 @@ uart uart0 (
     .uart_tx  (uart_tx),
     .uart_rx  (uart_rx),
     .uart_irq (uart0_irq)
+);
+
+// ----------------------------------------------------------------------------
+// SPI0 (base 0x4003_C000)
+
+spi spi0 (
+    .clk      (clk),
+    .rst_n    (rst_n),
+    .haddr    (dec_spi0_haddr),
+    .hwrite   (dec_spi0_hwrite),
+    .htrans   (dec_spi0_htrans),
+    .hsize    (dec_spi0_hsize),
+    .hwdata   (dec_spi0_hwdata),
+    .hrdata   (dec_spi0_hrdata),
+    .hready   (dec_spi0_hready),
+    .hresp    (dec_spi0_hresp),
+    .spi_sclk (spi0_sclk),
+    .spi_mosi (spi0_mosi),
+    .spi_miso (spi0_miso),
+    .spi_cs_n (spi0_cs_n),
+    .spi_irq  (spi0_irq)
 );
 
 endmodule

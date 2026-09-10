@@ -38,7 +38,10 @@ module spi (
     output wire        spi_cs_n,
 
     // Interrupt
-    output wire        spi_irq
+    output wire        spi_irq,
+
+    // DMA request (active when RX FIFO non-empty)
+    output wire        spi_dreq
 );
 
 // ---------------------------------------------------------------------------
@@ -108,6 +111,8 @@ reg [FIFO_AW:0]  rx_rptr;
 wire rx_full  = (rx_wptr[FIFO_AW] != rx_rptr[FIFO_AW]) &&
                 (rx_wptr[FIFO_AW-1:0] == rx_rptr[FIFO_AW-1:0]);
 wire rx_empty = (rx_wptr == rx_rptr);
+
+assign spi_dreq = !rx_empty;
 wire [FIFO_AW-1:0] rx_widx = rx_wptr[FIFO_AW-1:0];
 wire [FIFO_AW-1:0] rx_ridx = rx_rptr[FIFO_AW-1:0];
 

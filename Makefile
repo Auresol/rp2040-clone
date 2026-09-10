@@ -27,6 +27,9 @@ VERILATOR_FLAGS = \
 	-y $(RTL_DIR)/soc/peripheral \
 	-y $(RTL_DIR)/soc/peripheral/pio \
 	-y rtl/core/hazard3/example_soc/libfpga/common \
+	-y rtl/core/hazard3/example_soc/libfpga/peris/spi_03h_xip \
+	-y rtl/core/hazard3/example_soc/libfpga/mem \
+	rtl/core/hazard3/example_soc/libfpga/peris/spi_03h_xip/spi_03h_xip_regs.v \
 	--top-module $(TOP)
 
 SRC_RTL  = $(RTL_DIR)/soc/$(TOP).sv

@@ -3,8 +3,12 @@
 // CPU:   Hazard3 (RV32IMC), single hart
 // Debug: JTAG DTM → DM → CPU debug port (RISC-V 0.13.2 debug spec)
 //
-// Instruction port: CPU0-I → i_dec → SRAM I port.
+// Instruction port: CPU0-I → i_dec → SRAM I port or XIP flash (via cache).
 // Data port:        CPU0-D → d_dec → SRAM D port, GPIO, PIO0, PIO1, or UART0.
+//
+// Address map (instruction port):
+//   0x0000_0000 – 0x0000_FFFF  →  SRAM I port (64 KB)
+//   0x1000_0000 – 0x1FFF_FFFF  →  XIP flash (via cache → SPI 03h)
 //
 // Address map (data port):
 //   0x0000_0000 – 0x0000_FFFF  →  SRAM   (64 KB)
@@ -39,7 +43,13 @@ module rxpio32 (
 
     // UART0
     output wire        uart_tx,
-    input  wire        uart_rx
+    input  wire        uart_rx,
+
+    // SPI flash (XIP)
+    output wire        spi_cs_n,
+    output wire        spi_sck,
+    output wire        spi_mosi,
+    input  wire        spi_miso
 );
 
 // ----------------------------------------------------------------------------
@@ -407,8 +417,13 @@ ahb_d_decoder d_dec (
 );
 
 // ----------------------------------------------------------------------------
-// Instruction-port decoder: routes CPU0-I directly to SRAM I port.
-// s1 reserved for future fetch targets; tied off.
+// Instruction-port decoder: routes CPU0-I to SRAM I port or XIP flash.
+
+// i_dec s1 → XIP cache (upstream) wires
+wire [31:0] dec_xip_haddr,  dec_xip_hwdata,  dec_xip_hrdata;
+wire        dec_xip_hwrite, dec_xip_hready,  dec_xip_hresp;
+wire [1:0]  dec_xip_htrans;
+wire [2:0]  dec_xip_hsize;
 
 ahb_i_decoder i_dec (
     .clk       (clk),
@@ -433,15 +448,102 @@ ahb_i_decoder i_dec (
     .s0_hready (dec_isram_hready),
     .s0_hresp  (dec_isram_hresp),
 
-    // s1 → reserved, tied off
-    .s1_haddr  (),
-    .s1_hwrite (),
-    .s1_htrans (),
-    .s1_hsize  (),
-    .s1_hwdata (),
-    .s1_hrdata (32'h0),
-    .s1_hready (1'b1),
-    .s1_hresp  (1'b0)
+    // s1 → XIP flash (via cache)
+    .s1_haddr  (dec_xip_haddr),
+    .s1_hwrite (dec_xip_hwrite),
+    .s1_htrans (dec_xip_htrans),
+    .s1_hsize  (dec_xip_hsize),
+    .s1_hwdata (dec_xip_hwdata),
+    .s1_hrdata (dec_xip_hrdata),
+    .s1_hready (dec_xip_hready),
+    .s1_hresp  (dec_xip_hresp)
+);
+
+// ----------------------------------------------------------------------------
+// XIP flash: read-only cache → SPI 03h controller
+//
+// Cache: 256 × 32-bit = 1 KB, direct-mapped, 1-word lines (no burst).
+// SPI: single-bit MOSI/MISO, SCK = clk/2, 03h read command, 24-bit address.
+
+// Cache downstream → SPI controller wires
+wire [31:0] cache_spi_haddr,  cache_spi_hwdata,  cache_spi_hrdata;
+wire        cache_spi_hwrite, cache_spi_hready_resp;
+wire [1:0]  cache_spi_htrans;
+wire [2:0]  cache_spi_hsize, cache_spi_hburst;
+wire [3:0]  cache_spi_hprot;
+wire        cache_spi_hmastlock;
+wire        cache_spi_hresp;
+
+ahb_cache_readonly #(
+    .N_WAYS (1),
+    .W_LINE (32),
+    .DEPTH  (256)
+) xip_cache (
+    .clk              (clk),
+    .rst_n            (rst_n),
+
+    // Upstream: from i_dec s1
+    .src_hready_resp  (dec_xip_hready),
+    .src_hready       (dec_xip_hready),
+    .src_hresp        (dec_xip_hresp),
+    .src_haddr        (dec_xip_haddr),
+    .src_hwrite       (dec_xip_hwrite),
+    .src_htrans       (dec_xip_htrans),
+    .src_hsize        (dec_xip_hsize),
+    .src_hburst       (3'b000),
+    .src_hprot        (4'b0011),
+    .src_hmastlock    (1'b0),
+    .src_hwdata       (dec_xip_hwdata),
+    .src_hrdata       (dec_xip_hrdata),
+
+    // Downstream: to SPI controller
+    .dst_hready_resp  (cache_spi_hready_resp),
+    .dst_hready       (),
+    .dst_hresp        (cache_spi_hresp),
+    .dst_haddr        (cache_spi_haddr),
+    .dst_hwrite       (cache_spi_hwrite),
+    .dst_htrans       (cache_spi_htrans),
+    .dst_hsize        (cache_spi_hsize),
+    .dst_hburst       (cache_spi_hburst),
+    .dst_hprot        (cache_spi_hprot),
+    .dst_hmastlock    (cache_spi_hmastlock),
+    .dst_hwdata       (cache_spi_hwdata),
+    .dst_hrdata       (cache_spi_hrdata)
+);
+
+spi_03h_xip xip_spi (
+    .clk              (clk),
+    .rst_n            (rst_n),
+
+    // APB direct-access port — tied off (no flash programming from CPU yet)
+    .apbs_psel        (1'b0),
+    .apbs_penable     (1'b0),
+    .apbs_pwrite      (1'b0),
+    .apbs_paddr       (16'h0),
+    .apbs_pwdata      (32'h0),
+    .apbs_prdata      (),
+    .apbs_pready      (),
+    .apbs_pslverr     (),
+
+    // AHB-Lite slave: from cache downstream
+    .ahbls_hready_resp (cache_spi_hready_resp),
+    .ahbls_hready      (cache_spi_hready_resp),
+    .ahbls_hresp       (cache_spi_hresp),
+    .ahbls_haddr       (cache_spi_haddr),
+    .ahbls_hwrite      (cache_spi_hwrite),
+    .ahbls_htrans      (cache_spi_htrans),
+    .ahbls_hsize       (cache_spi_hsize),
+    .ahbls_hburst      (cache_spi_hburst),
+    .ahbls_hprot       (cache_spi_hprot),
+    .ahbls_hmastlock   (cache_spi_hmastlock),
+    .ahbls_hwdata      (cache_spi_hwdata),
+    .ahbls_hrdata      (cache_spi_hrdata),
+
+    // SPI pins
+    .spi_cs_n          (spi_cs_n),
+    .spi_sck           (spi_sck),
+    .spi_mosi          (spi_mosi),
+    .spi_miso          (spi_miso)
 );
 
 // ----------------------------------------------------------------------------

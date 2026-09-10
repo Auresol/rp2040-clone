@@ -56,6 +56,9 @@ int main(int argc, char **argv) {
     dut->tms    = 1;  // TMS=1 keeps TAP in Test-Logic-Reset
     dut->tdi    = 0;
 
+    // SPI flash — no flash attached in simulation
+    dut->spi_miso = 0;
+
     // Reset
     dut->rst_n = 0;
     dut->clk   = 0;

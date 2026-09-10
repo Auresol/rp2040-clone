@@ -43,6 +43,11 @@ rxpio32 soc (
     .uart_tx      (),
     .uart_rx      (1'b1),
 
+    // SPI flash — tied off (no flash attached in this build)
+    .spi_cs_n     (),
+    .spi_sck      (),
+    .spi_mosi     (),
+    .spi_miso     (1'b0)
 );
 
 endmodule

@@ -46,7 +46,7 @@ static void test_sram_routing() {
     dut->eval();
 
     check("s0_htrans = NONSEQ (SRAM selected)", dut->s0_htrans == NONSEQ);
-    check("s1_htrans = IDLE (s1 not selected)", dut->s1_htrans == IDLE);
+    check("s1_htrans = IDLE (XIP not selected)", dut->s1_htrans == IDLE);
     check("s0_haddr forwarded", dut->s0_haddr == 0x00000100u);
 
     tick();
@@ -55,19 +55,19 @@ static void test_sram_routing() {
 }
 
 // -----------------------------------------------------------------------
-// Test 2: s1 address → slave 1 gets transaction, slave 0 idle
+// Test 2: XIP address → slave 1 gets transaction, slave 0 idle
 // -----------------------------------------------------------------------
-static void test_s1_routing() {
-    printf("\nTest 2: s1 address routing\n");
+static void test_xip_routing() {
+    printf("\nTest 2: XIP address routing\n");
     reset();
 
     dut->m_htrans = NONSEQ;
-    dut->m_haddr  = 0x40000000;  // s1 range
+    dut->m_haddr  = 0x10000000;  // XIP flash range
     dut->eval();
 
-    check("s1_htrans = NONSEQ (s1 selected)", dut->s1_htrans == NONSEQ);
+    check("s1_htrans = NONSEQ (XIP selected)", dut->s1_htrans == NONSEQ);
     check("s0_htrans = IDLE (SRAM not selected)", dut->s0_htrans == IDLE);
-    check("s1_haddr forwarded", dut->s1_haddr == 0x40000000u);
+    check("s1_haddr forwarded", dut->s1_haddr == 0x10000000u);
 
     tick();
     dut->m_htrans = IDLE;
@@ -100,34 +100,34 @@ static void test_sram_response() {
 }
 
 // -----------------------------------------------------------------------
-// Test 4: response comes from s1 slave (sel_r)
+// Test 4: response comes from XIP slave (sel_r)
 // -----------------------------------------------------------------------
-static void test_s1_response() {
-    printf("\nTest 4: s1 response (sel_r)\n");
+static void test_xip_response() {
+    printf("\nTest 4: XIP response (sel_r)\n");
     reset();
 
-    // Address phase: select s1
+    // Address phase: select XIP
     dut->m_htrans  = NONSEQ;
-    dut->m_haddr   = 0x40000000;
+    dut->m_haddr   = 0x10000000;
     dut->s0_hrdata = 0xDEADDEAD;  // should NOT appear
     dut->s1_hrdata = 0x12345678;
     dut->eval();
 
-    tick();  // posedge: sel_r = s1
+    tick();  // posedge: sel_r = XIP
 
     dut->m_htrans = IDLE;
     dut->eval();
-    check("m_hrdata = s1_hrdata (s1)",      dut->m_hrdata == 0x12345678u);
+    check("m_hrdata = s1_hrdata (XIP)",     dut->m_hrdata == 0x12345678u);
     check("m_hready = s1_hready",           dut->m_hready == dut->s1_hready);
 
     tick();
 }
 
 // -----------------------------------------------------------------------
-// Test 5: back-to-back SRAM → s1 — sel_r tracks correctly
+// Test 5: back-to-back SRAM → XIP — sel_r tracks correctly
 // -----------------------------------------------------------------------
 static void test_switch_slaves() {
-    printf("\nTest 5: back-to-back SRAM then s1\n");
+    printf("\nTest 5: back-to-back SRAM then XIP\n");
     reset();
 
     // Transaction 1: SRAM
@@ -143,21 +143,21 @@ static void test_switch_slaves() {
     tick();  // sel_r = SRAM
 
     // Transaction 2 address phase starts, while tx1 data phase completes
-    dut->m_haddr  = 0x40000000;  // s1
+    dut->m_haddr  = 0x10000000;  // XIP flash
     dut->m_htrans = NONSEQ;
     dut->eval();
 
     // sel_r still SRAM (tx1 data phase)
     check("tx1 data: m_hrdata from SRAM", dut->m_hrdata == 0xAAAAAAAAu);
-    // sel is now s1 (tx2 address phase)
+    // sel is now XIP (tx2 address phase)
     check("tx2 addr: s1_htrans=NONSEQ",  dut->s1_htrans == NONSEQ);
     check("tx2 addr: s0_htrans=IDLE",    dut->s0_htrans == IDLE);
 
-    tick();  // sel_r = s1
+    tick();  // sel_r = XIP
 
     dut->m_htrans = IDLE;
     dut->eval();
-    check("tx2 data: m_hrdata from s1",   dut->m_hrdata == 0xBBBBBBBBu);
+    check("tx2 data: m_hrdata from XIP",  dut->m_hrdata == 0xBBBBBBBBu);
 
     tick();
 }
@@ -169,9 +169,9 @@ int main(int argc, char **argv) {
     dut = new Vahb_i_decoder;
 
     test_sram_routing();
-    test_s1_routing();
+    test_xip_routing();
     test_sram_response();
-    test_s1_response();
+    test_xip_response();
     test_switch_slaves();
 
     printf("\n%d/%d tests passed\n", passes, passes + failures);

@@ -15,6 +15,7 @@
 //   0x4000_0000 – 0x4000_FFFF  →  GPIO   (32-bit output register)
 //   0x4003_0000 – 0x4003_3FFF  →  UART0  (base 0x4003_0000, PL011-compatible)
 //   0x4003_C000 – 0x4003_FFFF  →  SPI0   (base 0x4003_C000, PL022-compatible)
+//   0x4005_0000 – 0x4005_FFFF  →  TIMER  (base 0x4005_4000, RISC-V mtime)
 //   0x5020_0000 – 0x5020_FFFF  →  PIO0
 //   0x5030_0000 – 0x5030_FFFF  →  PIO1
 
@@ -134,6 +135,14 @@ wire [31:0] dec_spi0_haddr,  dec_spi0_hwdata,  dec_spi0_hrdata;
 wire        dec_spi0_hwrite, dec_spi0_hready,  dec_spi0_hresp;
 wire [1:0]  dec_spi0_htrans;
 wire [2:0]  dec_spi0_hsize;
+
+// ----------------------------------------------------------------------------
+// Decoder → TIMER
+
+wire [31:0] dec_timer_haddr,  dec_timer_hwdata,  dec_timer_hrdata;
+wire        dec_timer_hwrite, dec_timer_hready,  dec_timer_hresp;
+wire [1:0]  dec_timer_htrans;
+wire [2:0]  dec_timer_hsize;
 
 // ----------------------------------------------------------------------------
 // JTAG Debug: DTM → DM → CPU0
@@ -368,7 +377,7 @@ hazard3_cpu_2port cpu0 (
 
     .irq           (uart0_irq | spi0_irq),
     .soft_irq      (1'b0),
-    .timer_irq     (1'b0)
+    .timer_irq     (timer_irq)
 );
 
 // ----------------------------------------------------------------------------
@@ -439,7 +448,16 @@ ahb_d_decoder d_dec (
     .s5_hwdata (dec_spi0_hwdata),
     .s5_hrdata (dec_spi0_hrdata),
     .s5_hready (dec_spi0_hready),
-    .s5_hresp  (dec_spi0_hresp)
+    .s5_hresp  (dec_spi0_hresp),
+
+    .s6_haddr  (dec_timer_haddr),
+    .s6_hwrite (dec_timer_hwrite),
+    .s6_htrans (dec_timer_htrans),
+    .s6_hsize  (dec_timer_hsize),
+    .s6_hwdata (dec_timer_hwdata),
+    .s6_hrdata (dec_timer_hrdata),
+    .s6_hready (dec_timer_hready),
+    .s6_hresp  (dec_timer_hresp)
 );
 
 // ----------------------------------------------------------------------------
@@ -663,9 +681,12 @@ uart uart0 (
     .hrdata   (dec_uart0_hrdata),
     .hready   (dec_uart0_hready),
     .hresp    (dec_uart0_hresp),
-    .uart_tx  (uart_tx),
-    .uart_rx  (uart_rx),
-    .uart_irq (uart0_irq)
+    .uart_tx    (uart_tx),
+    .uart_rx    (uart_rx),
+    .uart_rts_n (),         // flow control — not wired to top yet
+    .uart_cts_n (1'b0),     // CTS deasserted (always clear to send)
+    .uart_dreq  (),         // DMA request — no DMA controller yet
+    .uart_irq   (uart0_irq)
 );
 
 // ----------------------------------------------------------------------------
@@ -687,6 +708,26 @@ spi spi0 (
     .spi_miso (spi0_miso),
     .spi_cs_n (spi0_cs_n),
     .spi_irq  (spi0_irq)
+);
+
+// ----------------------------------------------------------------------------
+// Timer (base 0x4005_4000)
+
+wire timer_irq;
+
+timer timer0 (
+    .clk       (clk),
+    .rst_n     (rst_n),
+    .haddr     (dec_timer_haddr),
+    .hwrite    (dec_timer_hwrite),
+    .htrans    (dec_timer_htrans),
+    .hsize     (dec_timer_hsize),
+    .hwdata    (dec_timer_hwdata),
+    .hrdata    (dec_timer_hrdata),
+    .hready    (dec_timer_hready),
+    .hresp     (dec_timer_hresp),
+    .dbg_halt  (1'b0),
+    .timer_irq (timer_irq)
 );
 
 endmodule

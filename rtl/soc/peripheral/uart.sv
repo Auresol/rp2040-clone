@@ -14,7 +14,8 @@
 //   0x024  UARTIBRD [15:0]  integer baud-rate divisor (cycles per bit)
 //   0x028  UARTFBRD [5:0]   fractional baud-rate divisor (6-bit accumulator)
 //   0x02C  UARTLCR_H[7:0]   line control (accepted; 8N1 hardwired)
-//   0x030  UARTCR   [15:0]  control: [0]=UARTEN, [8]=TXE, [9]=RXE
+//   0x030  UARTCR   [15:0]  control: [0]=UARTEN, [8]=TXE, [9]=RXE,
+//                             [11]=RTSEn, [14]=CTSEn, [15]=LBE (loopback)
 //   0x038  UARTIMSC [10:0]  interrupt mask: [5]=TXIM, [4]=RXIM
 //   0x03C  UARTRIS  [10:0]  raw interrupt status (read-only)
 //   0x040  UARTMIS  [10:0]  masked interrupt status (read-only)
@@ -45,6 +46,13 @@ module uart (
     // UART pins
     output wire        uart_tx,
     input  wire        uart_rx,
+
+    // Hardware flow control
+    output wire        uart_rts_n,  // Request To Send (active low)
+    input  wire        uart_cts_n,  // Clear To Send (active low)
+
+    // DMA request
+    output wire        uart_dreq,
 
     // Interrupt
     output wire        uart_irq
@@ -88,6 +96,9 @@ reg [15:0] cr;      // [0]=UARTEN, [8]=TXE, [9]=RXE
 wire uarten = cr[0];
 wire txe    = cr[8];
 wire rxe    = cr[9];
+wire rtsen  = cr[11];  // hardware RTS enable
+wire ctsen  = cr[14];  // hardware CTS enable
+wire lbe    = cr[15];  // loopback enable
 
 reg [10:0] imsc;   // interrupt mask (PL011 bits [10:0])
 
@@ -160,7 +171,7 @@ always @(posedge clk or negedge rst_n) begin
 
             TX_IDLE: begin
                 tx_pin <= 1'b1;
-                if (uarten && txe && !tx_empty) begin
+                if (uarten && txe && !tx_empty && !(ctsen && uart_cts_n)) begin
                     tx_shift    <= tx_mem[tx_ridx];
                     tx_rptr     <= tx_rptr + 1;
                     tx_pin      <= 1'b0;           // drive start bit
@@ -217,13 +228,16 @@ assign uart_tx = uarten ? tx_pin : 1'b1;
 
 // ---------------------------------------------------------------------------
 // RX synchroniser (2-stage metastability guard)
+// Loopback: feed tx_pin back into RX path instead of external uart_rx.
+
+wire rx_pin = lbe ? tx_pin : uart_rx;
 
 reg [1:0] rx_sync;
 wire rx_in = rx_sync[1];
 
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) rx_sync <= 2'b11;
-    else        rx_sync <= {rx_sync[0], uart_rx};
+    else        rx_sync <= {rx_sync[0], rx_pin};
 end
 
 // ---------------------------------------------------------------------------
@@ -384,6 +398,12 @@ assign hrdata = (reg_addr_r == ADDR_DR)    ? {24'h0, rx_mem[rx_ridx]} :
 
 assign hready = 1'b1;
 assign hresp  = 1'b0;
+
+// RTS: deassert (high) when RX FIFO is full — tells sender to stop
+assign uart_rts_n = (rtsen && rx_full) ? 1'b1 : 1'b0;
+
+// DMA request: asserted when RX FIFO has data
+assign uart_dreq = !rx_empty;
 
 assign uart_irq = |mis;
 

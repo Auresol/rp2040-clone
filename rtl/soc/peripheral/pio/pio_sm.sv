@@ -198,28 +198,18 @@ wire [2:0] opcode    = cur_instr[15:13];
 wire [4:0] delay_side = cur_instr[12:8];
 wire [7:0] op_data   = cur_instr[7:0];
 
-wire [2:0] sideset_bits     = cfg_side_en ? (cfg_sideset_count - 3'd1) : cfg_sideset_count;
-wire [2:0] delay_bits_count = 3'd5 - cfg_sideset_count;
+// Number of actual side-set data bits (excluding enable if SIDE_EN)
+wire [2:0] sideset_data_bits = cfg_side_en ? (cfg_sideset_count - 3'd1) : cfg_sideset_count;
 
-wire side_en_bit  = cfg_side_en ? delay_side[4] : 1'b1;
-wire [4:0] side_data = cfg_side_en
-    ? (delay_side[4:0] & (5'hFF >> (4 - (cfg_sideset_count - 3'd1))))
-    : delay_side[4:0];
+wire side_en_bit = cfg_side_en ? delay_side[4] : 1'b1;
 
-wire [4:0] delay_val;
-generate
-    assign delay_val = (delay_side >> cfg_sideset_count) & ((5'h1F) >> cfg_sideset_count);
-endgenerate
+// Side-set data: upper bits of delay_side (below enable if SIDE_EN), shifted to LSB
+// Layout: [enable?][side_data bits][delay bits]  (MSB to LSB)
+wire [4:0] side_data = (delay_side >> (3'd5 - cfg_sideset_count))
+                     & ((sideset_data_bits == 3'd0) ? 5'h00 : ((5'd1 << sideset_data_bits) - 5'd1));
 
-// ============================================================================
-// PINS read helper
-// ============================================================================
-function automatic [31:0] read_pins_out_range;
-    input [31:0] gpio;
-    input [4:0]  base;
-    input [5:0]  count;
-    read_pins_out_range = (gpio >> base) & ((count == 6'd0) ? 32'hFFFF_FFFF : ((32'd1 << count) - 32'd1));
-endfunction
+// Delay value: low (5 - cfg_sideset_count) bits — just mask, no shift
+wire [4:0] delay_val = delay_side & ((cfg_sideset_count >= 3'd5) ? 5'h00 : (5'h1F >> cfg_sideset_count));
 
 // ============================================================================
 // Combinational next-state logic
@@ -648,7 +638,7 @@ always @(*) begin
                                 mov_src = op_data[2:0];
 
                                 case (mov_src)
-                                    3'b000: mov_val = read_pins_out_range(gpio_in, cfg_out_base, {1'b0, cfg_out_count[4:0]});
+                                    3'b000: mov_val = read_gpio_in_bits(gpio_in, cfg_in_base, 6'd0); // PINS: all 32, rotated by IN_BASE
                                     3'b001: mov_val = x_reg;
                                     3'b010: mov_val = y_reg;
                                     3'b011: mov_val = 32'd0;
@@ -772,21 +762,20 @@ always @(*) begin
                 // Side-set first (so pin writes take priority on overlap).
                 // Neither block runs on a stall cycle.
                 // ==============================================================
-                if (!do_stall) begin
-                    // Step 1: single apply_sideset call (was 8× across stall/fresh paths)
-                    if (side_en_bit && cfg_sideset_count > 3'd0) begin
-                        if (cfg_side_pindir)
-                            next_gpio_oe  = apply_sideset(gpio_oe,  side_data, cfg_sideset_base, cfg_sideset_count);
-                        else
-                            next_gpio_out = apply_sideset(gpio_out, side_data, cfg_sideset_base, cfg_sideset_count);
-                    end
-                    // Step 2: single write_pins call (was 5× across OUT/MOV/SET)
-                    if (pin_do_write) begin
-                        if (pin_wdst)
-                            next_gpio_oe  = write_pins(next_gpio_oe,  pin_wdata, pin_wbase, pin_wcount);
-                        else
-                            next_gpio_out = write_pins(next_gpio_out, pin_wdata, pin_wbase, pin_wcount);
-                    end
+                // Side-set: applied on first execution cycle, even if instruction stalls
+                // (RP2040 spec). Do NOT re-apply on stall re-check cycles.
+                if (!stalled && side_en_bit && sideset_data_bits > 3'd0) begin
+                    if (cfg_side_pindir)
+                        next_gpio_oe  = apply_sideset(gpio_oe,  side_data, cfg_sideset_base, sideset_data_bits);
+                    else
+                        next_gpio_out = apply_sideset(gpio_out, side_data, cfg_sideset_base, sideset_data_bits);
+                end
+                // Pin writes from instruction (OUT/MOV/SET): only when not stalling
+                if (!do_stall && pin_do_write) begin
+                    if (pin_wdst)
+                        next_gpio_oe  = write_pins(next_gpio_oe,  pin_wdata, pin_wbase, pin_wcount);
+                    else
+                        next_gpio_out = write_pins(next_gpio_out, pin_wdata, pin_wbase, pin_wcount);
                 end
 
             end : exec_block
@@ -822,13 +811,13 @@ endfunction
 function automatic [4:0] resolve_irq_num;
     input [4:0] raw;
     input [1:0] sm_idx;
-    if (raw[4])
-        resolve_irq_num = {1'b0, raw[3], 1'b0, ((raw[1:0] + sm_idx) & 2'b11)};
+    if (raw[4])  // rel: add sm_idx to low 2 bits mod 4, bit 2 passes through
+        resolve_irq_num = {2'b0, raw[2], ((raw[1:0] + sm_idx) & 2'b11)};
     else
         resolve_irq_num = {2'b0, raw[2:0]};
 endfunction
 
-// Write N bits into a 32-bit register at base (no wrap — within 32-bit word)
+// Write N bits into a 32-bit register at base (wraps at GPIO bit 31)
 function automatic [31:0] write_pins;
     input [31:0] cur;
     input [31:0] data;
@@ -836,10 +825,14 @@ function automatic [31:0] write_pins;
     input [5:0]  count;
     reg [31:0] mask;
     reg [5:0]  cnt;
+    reg [63:0] wide_mask, wide_data;
     begin
         cnt  = (count == 6'd0) ? 6'd32 : count;
         mask = (cnt == 6'd32) ? 32'hFFFF_FFFF : ((32'd1 << cnt) - 32'd1);
-        write_pins = (cur & ~(mask << base)) | ((data & mask) << base);
+        wide_mask = {32'd0, mask} << base;
+        wide_data = {32'd0, data & mask} << base;
+        write_pins = (cur & ~(wide_mask[31:0] | wide_mask[63:32]))
+                   | (wide_data[31:0] | wide_data[63:32]);
     end
 endfunction
 
@@ -849,12 +842,16 @@ function automatic [31:0] apply_sideset;
     input [4:0]  base;
     input [2:0]  count;
     reg [31:0] mask;
+    reg [63:0] wide_mask, wide_data;
     begin
         if (count == 3'd0)
             apply_sideset = cur;
         else begin
             mask = (32'd1 << count) - 32'd1;
-            apply_sideset = (cur & ~(mask << base)) | (({27'd0, data} & mask) << base);
+            wide_mask = {32'd0, mask} << base;
+            wide_data = {32'd0, {27'd0, data} & mask} << base;
+            apply_sideset = (cur & ~(wide_mask[31:0] | wide_mask[63:32]))
+                          | (wide_data[31:0] | wide_data[63:32]);
         end
     end
 endfunction

@@ -342,7 +342,9 @@ endgenerate
 
 assign irq_out = irq_flags[3:0];
 
-// We combine SM irq_set/clr; handle below in sequential block
+// Combine all SM set/clr into single wires (avoids NBA last-write-wins in loop)
+wire [7:0] all_sm_irq_set = sm_irq_set[0] | sm_irq_set[1] | sm_irq_set[2] | sm_irq_set[3];
+wire [7:0] all_sm_irq_clr = sm_irq_clr[0] | sm_irq_clr[1] | sm_irq_clr[2] | sm_irq_clr[3];
 
 // ============================================================================
 // Read data mux (combinational)
@@ -483,10 +485,8 @@ always @(posedge clk or negedge rst_n) begin
         tx_push_r[2]            <= 1'b0;
         tx_push_r[3]            <= 1'b0;
 
-        // Update IRQ flags from SM set/clr
-        for (i = 0; i < 4; i = i + 1) begin
-            irq_flags <= (irq_flags | sm_irq_set[i]) & ~sm_irq_clr[i];
-        end
+        // Update IRQ flags from SM set/clr (combined into single assignment)
+        irq_flags <= (irq_flags | all_sm_irq_set) & ~all_sm_irq_clr;
 
         // Latch FDEBUG sticky bits from SM outputs
         fdebug_txstall <= fdebug_txstall | sm_txstall_out;
@@ -525,17 +525,17 @@ always @(posedge clk or negedge rst_n) begin
                 12'h01C: begin tx_push_r[3] <= 1'b1; tx_wdata_r[3] <= hwdata; end
 
                 // -------------------------------------------------------
-                // IRQ (W1C)
+                // IRQ (W1C) — merge with SM set/clr so neither is lost
                 // -------------------------------------------------------
                 12'h030: begin
-                    irq_flags <= irq_flags & ~hwdata[7:0];
+                    irq_flags <= ((irq_flags | all_sm_irq_set) & ~all_sm_irq_clr) & ~hwdata[7:0];
                 end
 
                 // -------------------------------------------------------
-                // IRQ_FORCE (WO, force-set)
+                // IRQ_FORCE (WO, force-set) — merge with SM set/clr
                 // -------------------------------------------------------
                 12'h034: begin
-                    irq_flags <= irq_flags | hwdata[7:0];
+                    irq_flags <= ((irq_flags | all_sm_irq_set) & ~all_sm_irq_clr) | hwdata[7:0];
                 end
 
                 // -------------------------------------------------------

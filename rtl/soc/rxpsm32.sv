@@ -1,4 +1,4 @@
-// rxpio32 — Single-core RISC-V SoC with JTAG debug.
+// rxpsm32 — Single-core RISC-V SoC with JTAG debug.
 //
 // CPU:   Hazard3 (RV32IMC), single hart
 // Debug: JTAG DTM → DM → CPU debug port (RISC-V 0.13.2 debug spec)
@@ -19,7 +19,7 @@
 
 `default_nettype none
 
-module rxpio32 (
+module rxpsm32 (
     input  wire        clk,
     input  wire        rst_n,
 

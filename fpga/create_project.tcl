@@ -1,4 +1,4 @@
-# create_project.tcl — creates Vivado project for rxpio32 on Basys3
+# create_project.tcl — creates Vivado project for rxpsm32 on Basys3
 # Usage: vivado -mode batch -source fpga/create_project.tcl
 # Run from repo root: /data/rp2040-clone
 

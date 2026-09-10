@@ -3,7 +3,7 @@ RISCV_GCC     ?= riscv64-none-elf-gcc
 RISCV_OBJCOPY ?= riscv64-none-elf-objcopy
 VIVADO        ?= /tools/xillinx/2025.2/Vivado/bin/vivado
 
-TOP      = rxpio32
+TOP      = rxpsm32
 RTL_DIR  = rtl
 TB_DIR   = sim/tb
 SW_DIR   = sim/sw

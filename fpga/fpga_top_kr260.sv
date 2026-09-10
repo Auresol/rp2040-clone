@@ -35,7 +35,7 @@ wire [31:0] pio_gpio_out;
 wire [31:0] pio_gpio_oe;
 wire [7:0]  pio_irq;
 
-rxpio32 soc (
+rxpsm32 soc (
     .clk          (clk),
     .rst_n        (rst_n_sync),
 

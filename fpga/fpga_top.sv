@@ -1,6 +1,6 @@
 `default_nettype none
 
-// Basys3 top-level wrapper for rxpio32.
+// Basys3 top-level wrapper for rxpsm32.
 // Clock: 100 MHz onboard oscillator (W5)
 // Reset: btnC (T17), active-high → inverted to rst_n
 // GPIO:  gpio_out[15:0] → LD15:LD0
@@ -22,7 +22,7 @@ wire [7:0]  pio_irq;
 
 assign led = gpio_out[15:0];
 
-rxpio32 soc (
+rxpsm32 soc (
     .clk          (clk),
     .rst_n        (rst_n),
 

@@ -270,6 +270,7 @@ hazard3_dm #(
 wire [31:0] pio0_gpio_out, pio0_gpio_oe;
 wire [31:0] pio1_gpio_out, pio1_gpio_oe;
 wire [3:0]  pio0_irq, pio1_irq;
+wire        uart0_irq;
 
 // Per-bit priority mux: PIO1 overrides PIO0 when PIO1 has OE
 assign pio_gpio_out = (pio1_gpio_oe & pio1_gpio_out) |
@@ -349,7 +350,7 @@ hazard3_cpu_2port cpu0 (
     .mhartid_val   (32'h0),
     .eco_version    (4'h0),
 
-    .irq           (1'b0),
+    .irq           (uart0_irq),
     .soft_irq      (1'b0),
     .timer_irq     (1'b0)
 );
@@ -638,7 +639,8 @@ uart uart0 (
     .hready   (dec_uart0_hready),
     .hresp    (dec_uart0_hresp),
     .uart_tx  (uart_tx),
-    .uart_rx  (uart_rx)
+    .uart_rx  (uart_rx),
+    .uart_irq (uart0_irq)
 );
 
 endmodule

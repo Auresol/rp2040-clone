@@ -86,7 +86,7 @@ test-decoder: $(DEC_BIN)
 
 # ---------------------------------------------------------------------------
 
-.PHONY: all sim test sw clean remote-test remote-hello test-arbiter test-decoder test-uart test-spi test-i2c test-timer test-dma test-watchdog hello remote-fpga fpga-reports remote-fpga-kr260 fpga-reports-kr260 remote-bitstream-kr260 firmware-mem
+.PHONY: all sim test sw clean remote-test remote-hello test-arbiter test-decoder test-uart test-spi test-i2c test-timer test-dma test-watchdog test-reset hello remote-fpga fpga-reports remote-fpga-kr260 fpga-reports-kr260 remote-bitstream-kr260 firmware-mem
 
 all: sim
 
@@ -143,6 +143,9 @@ test-dma:
 
 test-watchdog:
 	cd $(TB_DIR) && nix-shell -p python313Packages.cocotb verilator --run "python3 test_watchdog.py"
+
+test-reset:
+	cd $(TB_DIR) && nix-shell -p python313Packages.cocotb verilator --run "python3 test_reset_controller.py"
 
 clean:
 	rm -rf obj_dir* sim_build $(SW_DIR)/*.elf $(SW_DIR)/*.bin $(SW_DIR)/*.vcd

@@ -747,7 +747,8 @@ uart uart0 (
     .uart_rx    (uart_rx),
     .uart_rts_n (),         // flow control — not wired to top yet
     .uart_cts_n (1'b0),     // CTS deasserted (always clear to send)
-    .uart_dreq  (),         // DMA request — no DMA controller yet
+    .uart_tx_dreq (),       // DMA request — no DMA controller yet
+    .uart_rx_dreq (),
     .uart_irq   (uart0_irq)
 );
 

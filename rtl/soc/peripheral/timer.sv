@@ -1,15 +1,34 @@
 // timer.sv — AHB-Lite RISC-V mtime/mtimecmp timer peripheral.
 //
-// Register map (byte offset from base):
-//   0x00  CTRL       [0]     enable counter
-//   0x04  PRESCALER  [15:0]  tick = clk / (PRESCALER+1)
-//   0x08  MTIME      [31:0]  counter low  (read/write)
-//   0x0C  MTIMEH     [31:0]  counter high (read/write)
-//   0x10  MTIMECMP   [31:0]  compare low  (read/write)
-//   0x14  MTIMECMPH  [31:0]  compare high (read/write)
+// Base address: caller-defined (decoder handles base; offsets below are relative).
 //
-// timer_irq asserts when mtime >= mtimecmp.
-// dbg_halt freezes the counter during debug.
+// Register map (byte offset from base):
+//   0x00  CTRL       [0]     enable — counter increments on prescaled ticks
+//   0x04  PRESCALER  [15:0]  tick divisor: tick = clk / (PRESCALER + 1)
+//                              0 = every clock, 99 = 1 MHz at 100 MHz clk
+//   0x08  MTIME      [31:0]  64-bit counter low word (read/write)
+//   0x0C  MTIMEH     [31:0]  64-bit counter high word (read/write)
+//   0x10  MTIMECMP   [31:0]  64-bit compare low word (read/write)
+//   0x14  MTIMECMPH  [31:0]  64-bit compare high word (read/write)
+//
+// timer_irq asserts when {MTIMEH, MTIME} >= {MTIMECMPH, MTIMECMP}.
+// dbg_halt freezes the counter during JTAG debug halt.
+//
+// Not implemented (RP2040 timer is a different design):
+//   ALARM0-3          — RP2040 has 4 independent alarm registers with per-alarm IRQ
+//   TIMELR/TIMEHR     — RP2040 latching read (TIMELR latches high word atomically)
+//   ARMED             — RP2040 alarm armed/disarmed status register
+//   DBGPAUSE          — RP2040 per-core debug pause control
+//   INTE/INTF/INTS    — RP2040 per-alarm interrupt enable/force/status
+//
+// Known limitations:
+//   - No atomic 64-bit read: software must read MTIMEH, MTIME, MTIMEH again
+//     and retry if high word changed (standard RISC-V mtime pattern)
+//   - PRESCALER is not in the RP2040 timer (added for flexible tick rate)
+//   - Single compare: only one compare pair, not 4 alarms like RP2040
+//
+// AHB pipeline: address phase registers htrans/hwrite/haddr; data phase captures
+// hwdata for writes and returns hrdata combinationally for reads.
 
 `default_nettype none
 

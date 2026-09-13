@@ -1,29 +1,72 @@
 // dma.sv — 4-channel DMA controller with AHB-Lite slave + master ports.
 //
-// Each channel: READ_ADDR, WRITE_ADDR, TRANS_COUNT, CTRL.
-// Channels are DREQ-paced (or free-running if dreq_sel=none).
-// Round-robin scheduling among active channels.
+// Base address: caller-defined (decoder handles base; offsets below are relative).
+//
+// 4-channel DMA with round-robin scheduling, DREQ pacing, and auto-disable.
+// Each channel performs single-beat AHB-Lite read→write transfers. Channels
+// are DREQ-paced (peripheral requests data) or free-running (DREQ_SEL=0).
 //
 // Register map (byte offset from base):
-//   Channel N (stride = 0x10):
-//     0x00 + N*0x10  READ_ADDR    [31:0]  source address
-//     0x04 + N*0x10  WRITE_ADDR   [31:0]  destination address
-//     0x08 + N*0x10  TRANS_COUNT  [31:0]  transfers remaining
-//     0x0C + N*0x10  CTRL         [31:0]  channel control
-//
-//   CTRL fields:
-//     [0]      EN          channel enable
-//     [1]      INCR_READ   increment read address after each transfer
-//     [2]      INCR_WRITE  increment write address after each transfer
-//     [4:3]    DATA_SIZE   transfer width: 00=byte, 01=half, 10=word
-//     [7:5]    DREQ_SEL    DREQ source (0=none/free-run, 1-7=dreq[0]-dreq[6])
-//     [8]      IRQ_EN      fire IRQ when count reaches zero
+//   Channel N registers (N=0..3, stride = 0x10):
+//     0x00 + N*0x10  READ_ADDR    [31:0]  source address (read/write)
+//                                          auto-incremented if INCR_READ=1
+//     0x04 + N*0x10  WRITE_ADDR   [31:0]  destination address (read/write)
+//                                          auto-incremented if INCR_WRITE=1
+//     0x08 + N*0x10  TRANS_COUNT  [31:0]  transfers remaining (read/write)
+//                                          decremented after each transfer
+//     0x0C + N*0x10  CTRL         [31:0]  channel control (read/write)
+//                                          [0]    EN — channel enable
+//                                          [1]    INCR_READ — auto-increment source
+//                                          [2]    INCR_WRITE — auto-increment dest
+//                                          [4:3]  DATA_SIZE — 00=byte, 01=half, 10=word
+//                                          [7:5]  DREQ_SEL — 0=free-run, 1..4=dreq[0..3]
+//                                          [8]    IRQ_EN — assert IRQ on completion
+//                                          [12:9] CHAIN_TO — channel to trigger on
+//                                                 completion (>=NUM_CH = no chain)
+//                                          [13]   RING_SEL — 0=ring read, 1=ring write
+//                                          [17:14] RING_SIZE — log2(ring bytes),
+//                                                  0=disabled, e.g. 4=16-byte ring
 //
 //   Global registers:
-//     0x40  IRQ_STATUS  [3:0]  per-channel done flag (write-1-to-clear)
+//     0x40  IRQ_STATUS  [3:0]  per-channel completion flag (read, write-1-to-clear)
+//                               bit N set when channel N TRANS_COUNT reaches 0
 //
-// Master port issues single AHB-Lite reads/writes (no burst).
-// dma_irq = OR of all (IRQ_STATUS & IRQ_EN) bits.
+// Transfer flow:
+//   1. CPU writes READ_ADDR, WRITE_ADDR, TRANS_COUNT, CTRL (with EN=1)
+//   2. DMA waits for DREQ (or runs immediately if DREQ_SEL=0)
+//   3. DMA issues AHB read from READ_ADDR, captures data
+//   4. DMA issues AHB write to WRITE_ADDR with captured data
+//   5. Addresses incremented, TRANS_COUNT decremented
+//   6. When TRANS_COUNT reaches 0: channel auto-disables (EN=0),
+//      IRQ_STATUS[N] set if IRQ_EN=1
+//   7. Round-robin picks next ready channel
+//
+// Master port issues single-beat (non-burst) AHB-Lite reads and writes.
+// dma_irq = OR of all channels where (IRQ_STATUS[N] & CTRL[N].IRQ_EN).
+//
+// Not implemented (RP2040 DMA differences):
+//   (Chain trigger and ring buffer are now implemented — see CTRL fields above)
+//   Byte lane swapping  — RP2040 CTRL has BSWAP for endianness conversion
+//   Sniff / CRC         — RP2040 DMA can CRC/checksum data as it flows through
+//   CTRL aliases        — RP2040 has CTRL_TRIG (write triggers channel start)
+//   Priority levels     — RP2040 has HIGH_PRIORITY bit; we use strict round-robin
+//   12 channels         — RP2040 has 12 channels; we have 4
+//   Timer pacing        — RP2040 DMA has 4 internal pace timers
+//   Channel abort       — RP2040 CHAN_ABORT register for safe mid-transfer abort
+//   Debug registers     — RP2040 DBG_CTDREQ / DBG_TCR for debug visibility
+//
+// Known limitations:
+//   - 4 channels only (RP2040 has 12)
+//   - Single-beat transfers: no burst mode, one AHB read + one AHB write per beat
+//   - DREQ inputs are 4-wide (dreq[3:0]); DREQ_SEL values 5-7 map to nothing
+//   - Chain trigger only sets EN on target; does not reload TRANS_COUNT or addresses
+//   - Ring buffer wraps address within a power-of-2 window; only one of read/write
+//   - CPU can abort a channel by clearing EN, but mid-flight transfers complete
+//   - Round-robin is strict: no priority levels
+//   - No byte/halfword lane alignment (DATA_SIZE passed to AHB hsize only)
+//
+// AHB pipeline: address phase registers htrans/hwrite/haddr; data phase captures
+// hwdata for writes and returns hrdata combinationally for reads.
 
 `default_nettype none
 
@@ -101,6 +144,9 @@ reg [3:0]  irq_status;
 `define CH_DATA_SIZE(c)  ch_ctrl[c][4:3]
 `define CH_DREQ_SEL(c)   ch_ctrl[c][7:5]
 `define CH_IRQ_EN(c)     ch_ctrl[c][8]
+`define CH_CHAIN_TO(c)   ch_ctrl[c][12:9]
+`define CH_RING_SEL(c)   ch_ctrl[c][13]
+`define CH_RING_SIZE(c)  ch_ctrl[c][17:14]
 
 // Transfer size in bytes
 function [2:0] size_bytes;
@@ -111,6 +157,25 @@ function [2:0] size_bytes;
         2'b10: size_bytes = 3'd4;
         default: size_bytes = 3'd4;
     endcase
+endfunction
+
+// Ring-wrap address: increments within a power-of-2 window, upper bits unchanged.
+// ring_size = log2(bytes); 0 means disabled (plain increment).
+function [31:0] ring_incr;
+    input [31:0] addr;
+    input [2:0]  incr;
+    input [3:0]  ring_size;
+    reg [31:0] mask;
+    reg [31:0] next;
+    begin
+        if (ring_size == 4'd0) begin
+            ring_incr = addr + {29'h0, incr};
+        end else begin
+            mask = (32'd1 << ring_size) - 32'd1;
+            next = addr + {29'h0, incr};
+            ring_incr = (addr & ~mask) | (next & mask);
+        end
+    end
 endfunction
 
 // Slave decode helpers
@@ -215,12 +280,20 @@ always @(posedge clk or negedge rst_n) begin
 
         // --- DMA transfer completion updates (overrides CPU if same cycle) ---
         if (xfer_done) begin
-            if (`CH_INCR_RD(active_ch))
-                ch_read_addr[active_ch] <= ch_read_addr[active_ch] +
-                    {29'h0, size_bytes(`CH_DATA_SIZE(active_ch))};
-            if (`CH_INCR_WR(active_ch))
-                ch_write_addr[active_ch] <= ch_write_addr[active_ch] +
-                    {29'h0, size_bytes(`CH_DATA_SIZE(active_ch))};
+            if (`CH_INCR_RD(active_ch)) begin
+                ch_read_addr[active_ch] <= ring_incr(
+                    ch_read_addr[active_ch],
+                    size_bytes(`CH_DATA_SIZE(active_ch)),
+                    `CH_RING_SEL(active_ch) ? 4'd0 : `CH_RING_SIZE(active_ch)
+                );
+            end
+            if (`CH_INCR_WR(active_ch)) begin
+                ch_write_addr[active_ch] <= ring_incr(
+                    ch_write_addr[active_ch],
+                    size_bytes(`CH_DATA_SIZE(active_ch)),
+                    `CH_RING_SEL(active_ch) ? `CH_RING_SIZE(active_ch) : 4'd0
+                );
+            end
 
             ch_trans_count[active_ch] <= ch_trans_count[active_ch] - 32'd1;
 
@@ -228,6 +301,9 @@ always @(posedge clk or negedge rst_n) begin
                 ch_ctrl[active_ch][0] <= 1'b0;  // auto-disable
                 if (`CH_IRQ_EN(active_ch))
                     irq_status[active_ch] <= 1'b1;
+                // Chain trigger: enable the target channel
+                if (`CH_CHAIN_TO(active_ch) < NUM_CH[3:0])
+                    ch_ctrl[`CH_CHAIN_TO(active_ch)[1:0]][0] <= 1'b1;
             end
         end
 

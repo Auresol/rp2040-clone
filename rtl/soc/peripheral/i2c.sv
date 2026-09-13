@@ -1,20 +1,67 @@
 // i2c.sv — AHB-Lite I2C master peripheral.
 //
-// Register map (byte offset from base):
-//   0x00  CON       [0]     enable
-//   0x04  TAR       [6:0]   7-bit target address
-//   0x08  DATA_CMD  write:  [7:0]=data, [8]=CMD(0=wr,1=rd), [9]=STOP, [10]=RESTART
-//                   read:   [7:0]=received data (RX FIFO pop)
-//   0x0C  SCL_HCNT  [15:0]  SCL high-period clock count
-//   0x10  SCL_LCNT  [15:0]  SCL low-period clock count
-//   0x14  STATUS    [5:0]   flags (read-only)
-//   0x18  IMSC      [2:0]   interrupt mask
-//   0x1C  RIS       [2:0]   raw interrupt status
-//   0x20  MIS       [2:0]   masked interrupt status
+// Base address: caller-defined (decoder handles base; offsets below are relative).
 //
-// Open-drain interface: scl_oe/sda_oe = 1 pulls line low, 0 releases.
-// Clock stretching: waits for scl_i to go high before counting SCL high period.
-// Auto-STOP on FIFO underrun.
+// Master-only I2C controller modelled loosely on the Synopsys DesignWare
+// DW_apb_i2c (as used in the RP2040). The RP2040's I2C block is NOT an ARM
+// PrimeCell — it is a DW_apb_i2c instance with APB interface; we use AHB-Lite.
+//
+// Register map (byte offset from base):
+//   0x00  CON       [0]       master enable (1=enabled, 0=disabled)
+//   0x04  TAR       [6:0]     7-bit target slave address
+//   0x08  DATA_CMD  write:    [7:0]  TX data
+//                              [8]   CMD — 0=write byte, 1=read byte
+//                              [9]   STOP — generate STOP after this byte
+//                              [10]  RESTART — generate repeated START before this byte
+//                   read:     [7:0]  RX data (pops from RX FIFO)
+//   0x0C  SCL_HCNT  [15:0]    SCL high-period count (in clk cycles)
+//   0x10  SCL_LCNT  [15:0]    SCL low-period count (in clk cycles)
+//   0x14  STATUS    [5:0]     status flags (read-only)
+//                              [0] NACK_ERR — NACK received (sticky until next START)
+//                              [1] TFNF — TX cmd FIFO not full
+//                              [2] TFE — TX cmd FIFO empty
+//                              [3] RFNE — RX FIFO not empty (data available)
+//                              [4] RFF — RX FIFO full
+//                              [5] MST_ACTIVE — I2C engine busy
+//   0x18  IMSC      [2:0]     interrupt mask (read/write)
+//                              [0] TX_EMPTY — TX cmd FIFO empty
+//                              [1] RX_DATA — RX FIFO not empty
+//                              [2] NACK — NACK error occurred
+//   0x1C  RIS       [2:0]     raw interrupt status (read-only)
+//   0x20  MIS       [2:0]     masked interrupt status (read-only, RIS & IMSC)
+//
+// Open-drain interface: scl_oe/sda_oe = 1 pulls line low, 0 releases (high-Z).
+// Clock stretching: SCL high phase waits for scl_i to go high before counting.
+// Auto-STOP on TX FIFO underrun (prevents bus hang).
+//
+// I2C engine states:
+//   IDLE → START → address byte → ACK → data bytes → ACK → STOP
+//   Supports repeated START (RESTART bit) for combined write+read transactions.
+//
+// Not implemented (RP2040 / DW_apb_i2c differences):
+//   IC_SLV_DATA_NACK_ONLY  — slave mode (we are master-only)
+//   IC_10BITADDR_MASTER    — 10-bit addressing (7-bit only)
+//   IC_SS/FS/HS_SCL_*CNT   — RP2040 has per-speed-mode timing registers
+//   IC_INTR_STAT           — RP2040 has 13 interrupt sources; we have 3
+//   IC_RX_TL / IC_TX_TL    — FIFO threshold interrupts
+//   IC_TX_ABRT_SOURCE      — detailed abort reason register (16 sources)
+//   IC_DMA_CR/TDLR/RDLR   — DMA interface registers
+//   IC_SDA_HOLD/SETUP      — SDA timing control
+//   IC_ACK_GENERAL_CALL    — general call response
+//   Multi-master / arbitration — single-master only, no bus arbitration
+//   Speed mode select       — no standard/fast/high mode distinction
+//
+// Known limitations:
+//   - Master-only: no slave mode, no multi-master arbitration
+//   - 7-bit addressing only (no 10-bit)
+//   - No SDA hold/setup time registers (timing follows SCL_HCNT/LCNT only)
+//   - TX and RX FIFOs are 8 entries deep (fixed, not configurable)
+//   - NACK_ERR is sticky until the next START; no separate abort register
+//   - No FIFO level threshold interrupts
+//   - No bus timeout detection
+//
+// AHB pipeline: address phase registers htrans/hwrite/haddr; data phase captures
+// hwdata for writes and returns hrdata combinationally for reads.
 
 `default_nettype none
 

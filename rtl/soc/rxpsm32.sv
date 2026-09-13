@@ -12,7 +12,7 @@
 //
 // Address map (data port):
 //   0x0000_0000 – 0x0000_FFFF  →  SRAM     (64 KB)
-//   0x4000_0000 – 0x4000_FFFF  →  GPIO     (32-bit output register)
+//   0x4000_0000 – 0x4000_FFFF  →  GPIO     (SIO-style: IN/OUT/OE + SET/CLR/XOR)
 //   0x4003_0000 – 0x4003_3FFF  →  UART0    (PL011-compatible)
 //   0x4003_C000 – 0x4003_FFFF  →  SPI0     (PL022-compatible)
 //   0x4005_0000 – 0x4005_3FFF  →  TIMER    (RISC-V mtime)
@@ -35,8 +35,10 @@ module rxpsm32 (
     input  wire        tdi,
     output wire        tdo,
 
-    // Simple GPIO output (backward-compatible with existing tests)
+    // GPIO
+    input  wire [31:0] gpio_in,
     output wire [31:0] gpio_out,
+    output wire [31:0] gpio_oe,
 
     // PIO GPIO interface
     input  wire [31:0] pio_gpio_in,
@@ -682,11 +684,14 @@ gpio gpio0 (
     .haddr    (dec_gpio_haddr),
     .hwrite   (dec_gpio_hwrite),
     .htrans   (dec_gpio_htrans),
+    .hsize    (dec_gpio_hsize),
     .hwdata   (dec_gpio_hwdata),
     .hrdata   (dec_gpio_hrdata),
     .hready   (dec_gpio_hready),
     .hresp    (dec_gpio_hresp),
-    .gpio_out (gpio_out)
+    .gpio_in  (gpio_in),
+    .gpio_out (gpio_out),
+    .gpio_oe  (gpio_oe)
 );
 
 // ----------------------------------------------------------------------------
@@ -771,7 +776,8 @@ spi spi0 (
     .spi_miso (spi0_miso),
     .spi_cs_n (spi0_cs_n),
     .spi_irq  (spi0_irq),
-    .spi_dreq ()              // DMA request — not wired yet
+    .spi_dreq    (),          // DMA RX request — not wired yet
+    .spi_dreq_tx ()           // DMA TX request — not wired yet
 );
 
 // ----------------------------------------------------------------------------

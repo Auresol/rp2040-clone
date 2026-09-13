@@ -1,19 +1,43 @@
 // watchdog.sv — Watchdog timer with 1 MHz tick output.
 //
-// Down-counter decrements on each tick. If firmware doesn't kick it
+// Base address: caller-defined (decoder handles base; offsets below are relative).
+//
+// Down-counter decrements on each 1 MHz tick. If firmware doesn't kick it
 // before it reaches zero, wdog_reset asserts for one cycle.
 //
 // Register map (byte offset from base):
-//   0x00  CTRL      [0]  enable, [1] pause_on_debug, [31] force_reset (W1)
-//   0x04  LOAD      [23:0]  reload value (max ~16.7M ticks = ~16.7s at 1 MHz)
-//   0x08  COUNT     [23:0]  current counter (read-only)
-//   0x0C  KICK      write 0x6B696B6B to reload counter from LOAD
-//   0x10  REASON    [1:0]  reset reason: [0] watchdog timeout, [1] force reset
-//                          (write-1-to-clear, sticky across resets)
+//   0x00  CTRL      [31:0]  control register
+//                              [0]  ENABLE — start/stop watchdog counter
+//                              [1]  PAUSE_DBG — freeze counter during JTAG debug halt
+//                              [31] FORCE_RESET — write-1 triggers immediate reset pulse
+//                                   (self-clearing, reads as 0)
+//   0x04  LOAD      [23:0]  reload value written to counter on kick
+//                              max 0xFFFFFF = ~16.7M ticks = ~16.7s at 1 MHz
+//   0x08  COUNT     [23:0]  current counter value (read-only, decrements toward 0)
+//   0x0C  KICK      [31:0]  write 0x6B696B6B ("kikk") to reload counter from LOAD
+//                              any other value is silently ignored
+//   0x10  REASON    [1:0]   reset reason (sticky, write-1-to-clear)
+//                              [0] TIMEOUT — watchdog counter reached zero
+//                              [1] FORCED  — CTRL.FORCE_RESET was written
 //
 // Outputs:
-//   wdog_reset  — pulse when counter reaches zero or force triggered
-//   tick_1mhz   — 1-cycle pulse at ~1 MHz (clk / CLK_HZ_DIV)
+//   wdog_reset  — one-cycle pulse when counter reaches zero or force triggered
+//   tick_1mhz   — one-cycle pulse at ~1 MHz (clk / CLK_HZ), shared with other peripherals
+//
+// Not implemented (RP2040 watchdog differences):
+//   SCRATCH0-7      — 8 general-purpose scratch registers (survive watchdog reset)
+//   TICK register    — RP2040 configures tick rate via register; we use CLK_HZ parameter
+//   CTRL[24:16]     — RP2040 PAUSE_JTAG/PAUSE_DBG0/DBG1 per-core; we have single PAUSE_DBG
+//   CTRL[30:0] TIME — RP2040 exposes remaining count in CTRL; we use separate COUNT register
+//
+// Known limitations:
+//   - Kick requires exact magic value 0x6B696B6B (RP2040 uses 0x6AB73121)
+//   - REASON bits are sticky across POR (intentional for post-mortem diagnosis)
+//   - tick_1mhz accuracy depends on CLK_HZ parameter matching actual clock
+//   - No window mode (minimum kick interval) — kick is always accepted
+//
+// AHB pipeline: address phase registers htrans/hwrite/haddr; data phase captures
+// hwdata for writes and returns hrdata combinationally for reads.
 
 `default_nettype none
 

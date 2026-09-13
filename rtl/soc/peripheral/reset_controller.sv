@@ -1,21 +1,49 @@
 // reset_controller.sv — Per-peripheral reset control with multiple reset sources.
 //
-// Reset sources (active-high pulses):
-//   - POR (power-on reset): resets everything including this controller
-//   - Watchdog timeout: resets CPU + all peripherals (not watchdog, not this controller)
-//   - Software chip reset: same as watchdog (CPU writes CHIP_RESET register)
+// Base address: caller-defined (decoder handles base; offsets below are relative).
 //
-// Peripherals boot in reset (RESET=0xFF). Firmware releases them individually.
+// Reset sources (active-high pulses, priority high → low):
+//   1. POR (power-on reset): resets everything including this controller's logic
+//   2. Watchdog timeout:     resets CPU + re-asserts all peripheral resets
+//   3. Software chip reset:  same effect as watchdog (CPU writes CHIP_RESET[0]=1)
 //
 // Register map (byte offset from base):
-//   0x00  RESET       [7:0]  per-peripheral reset (1=held in reset, 0=running)
-//                             Defaults to 0xFF (all in reset) after any chip reset.
-//   0x04  RESET_DONE  [7:0]  read-only, 1=peripheral running
-//                             TODO: currently just ~RESET. Real ASIC should wait
-//                             for peripheral-ready handshake (PLL lock, SRAM init, etc.)
-//   0x08  REASON      [2:0]  sticky reset reason (write-1-to-clear)
-//                             [0] POR, [1] watchdog, [2] software chip reset
-//   0x0C  CHIP_RESET  [0]    write 1 = full chip reset (CPU + all peripherals)
+//   0x00  RESET       [7:0]  per-peripheral reset control (read/write)
+//                              1 = held in reset, 0 = released (running)
+//                              reset value: 0x00 (FPGA default, all released)
+//                              TODO: change to 0xFF for ASIC boot sequence
+//   0x04  RESET_DONE  [7:0]  per-peripheral ready status (read-only)
+//                              1 = peripheral running, 0 = in reset
+//                              currently mirrors ~RESET (combinational inverse)
+//                              TODO: add peripheral-ready handshake for ASIC
+//   0x08  REASON      [2:0]  reset reason flags (read, write-1-to-clear)
+//                              [0] POR     — power-on reset occurred
+//                              [1] WDOG    — watchdog timeout occurred
+//                              [2] SW      — software chip reset occurred
+//                              bits are sticky: accumulate across reset events
+//   0x0C  CHIP_RESET  [0]    software chip reset trigger (write-only, reads as 0)
+//                              write 1 = full chip reset (CPU + all peripherals)
+//                              self-clearing: chip_reset_req pulses for one cycle
+//
+// Outputs:
+//   cpu_rst_n     — active-low CPU reset, asserted on any chip reset, auto-releases
+//                   after one cycle (CPU restarts from reset vector)
+//   periph_rst_n  — active-low per-peripheral resets, directly driven by ~RESET register
+//
+// Not implemented (RP2040 differences):
+//   WDSEL           — RP2040 selects which peripherals watchdog resets; we reset all
+//   PSM (Power State Machine) — RP2040 has sequenced power-up/down; we use simple reg
+//   RESET_DONE handshake — should wait for peripheral ready signal, not just ~RESET
+//
+// Known limitations:
+//   - CPU auto-releases from reset after 1 cycle (no firmware-controlled hold)
+//   - RESET defaults to 0x00 (FPGA convenience); ASIC should default to 0xFF
+//   - RESET_DONE is just ~RESET (no real ready handshake from peripherals)
+//   - No reset sequencing: all peripherals release simultaneously
+//   - Watchdog and software reset have equal priority (last one wins in same cycle)
+//
+// AHB pipeline: address phase registers htrans/hwrite/haddr; data phase captures
+// hwdata for writes and returns hrdata combinationally for reads.
 
 `default_nettype none
 

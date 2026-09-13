@@ -222,6 +222,141 @@ async def test_reason_sticky(dut):
 
 
 # ---------------------------------------------------------------------------
+# Tests — register behavior
+# ---------------------------------------------------------------------------
+
+@cocotb.test()
+async def test_chip_reset_reads_zero(dut):
+    """CHIP_RESET register always reads as 0 (write-only, self-clearing).
+
+    Pass: reading CHIP_RESET returns 0 before and after writing 1 to it.
+    """
+    await reset(dut)
+
+    val = await ahb_read(dut, CHIP_RESET)
+    assert val == 0, f"CHIP_RESET should read 0 before write, got 0x{val:x}"
+
+    await ahb_write(dut, CHIP_RESET, 1)
+    await ClockCycles(dut.clk, 3)
+
+    val = await ahb_read(dut, CHIP_RESET)
+    assert val == 0, f"CHIP_RESET should read 0 after write, got 0x{val:x}"
+
+
+@cocotb.test()
+async def test_chip_reset_zero_is_noop(dut):
+    """Writing 0 to CHIP_RESET does not trigger a reset.
+
+    Pass: RESET register and periph_rst_n unchanged after writing 0 to CHIP_RESET.
+    """
+    await reset(dut)
+
+    reset_before = await ahb_read(dut, RESET)
+    await ahb_write(dut, CHIP_RESET, 0)
+    await ClockCycles(dut.clk, 3)
+
+    reset_after = await ahb_read(dut, RESET)
+    assert reset_after == reset_before, f"RESET should be unchanged, was 0x{reset_before:02x} now 0x{reset_after:02x}"
+
+
+@cocotb.test()
+async def test_bit_isolation(dut):
+    """Resetting one peripheral does not affect others.
+
+    Pass: only the targeted bit changes in RESET and periph_rst_n; all other bits stay 0.
+    """
+    await reset(dut)
+
+    # Assert reset on bit 5 only
+    await ahb_write(dut, RESET, 0x20)
+
+    reset_reg = await ahb_read(dut, RESET)
+    assert reset_reg == 0x20, f"expected only bit 5 set, got 0x{reset_reg:02x}"
+
+    periph = int(dut.periph_rst_n.value)
+    # bit 5 should be 0 (in reset), all others 1 (running)
+    assert periph == 0xDF, f"periph_rst_n should be 0xDF, got 0x{periph:02x}"
+
+
+@cocotb.test()
+async def test_cpu_auto_release_timing(dut):
+    """CPU reset auto-releases exactly 1 cycle after watchdog pulse ends.
+
+    Pass: cpu_rst_n goes low for exactly 1 cycle, then returns high.
+    """
+    await reset(dut)
+    await ClockCycles(dut.clk, 3)
+    assert int(dut.cpu_rst_n.value) == 1, "CPU should be running"
+
+    # Fire watchdog
+    dut.wdog_reset.value = 1
+    await RisingEdge(dut.clk)
+    dut.wdog_reset.value = 0
+
+    # Should be in reset now
+    await RisingEdge(dut.clk)
+    assert int(dut.cpu_rst_n.value) == 0, "CPU should be in reset"
+
+    # Should auto-release next cycle
+    await RisingEdge(dut.clk)
+    assert int(dut.cpu_rst_n.value) == 1, "CPU should auto-release after 1 cycle"
+
+
+@cocotb.test()
+async def test_reason_w1c_selective(dut):
+    """Write-1-to-clear on REASON only clears targeted bits, not others.
+
+    Pass: clearing bit 0 (POR) preserves bit 1 (WDOG) if both are set.
+    """
+    await reset(dut)
+
+    # Set both POR and WDOG reason
+    dut.wdog_reset.value = 1
+    await RisingEdge(dut.clk)
+    dut.wdog_reset.value = 0
+    await ClockCycles(dut.clk, 3)
+
+    reason = await ahb_read(dut, REASON)
+    assert reason == 0x3, f"expected POR+WDOG (0x3), got 0x{reason:x}"
+
+    # Clear only POR bit
+    await ahb_write(dut, REASON, 0x1)
+    reason = await ahb_read(dut, REASON)
+    assert reason == 0x2, f"expected WDOG only (0x2) after clearing POR, got 0x{reason:x}"
+
+
+@cocotb.test()
+async def test_periph_rst_n_tracks_reset_reg(dut):
+    """periph_rst_n output is the combinational inverse of the RESET register.
+
+    Pass: periph_rst_n == ~RESET for several different RESET values.
+    """
+    await reset(dut)
+
+    for pattern in [0x00, 0xFF, 0xAA, 0x55, 0x01, 0x80]:
+        await ahb_write(dut, RESET, pattern)
+        await RisingEdge(dut.clk)  # wait for register update to propagate
+        periph = int(dut.periph_rst_n.value)
+        expected = (~pattern) & 0xFF
+        assert periph == expected, f"RESET=0x{pattern:02x}: periph_rst_n=0x{periph:02x}, expected 0x{expected:02x}"
+
+
+@cocotb.test()
+async def test_reset_done_mirrors_running(dut):
+    """RESET_DONE reads as ~RESET (all bits inverted).
+
+    Pass: RESET_DONE == ~RESET for several patterns.
+    """
+    await reset(dut)
+
+    for pattern in [0x00, 0xFF, 0x0F, 0xF0]:
+        await ahb_write(dut, RESET, pattern)
+        done = await ahb_read(dut, RESET_DONE)
+        expected = (~pattern) & 0xFF
+        assert done == expected, f"RESET=0x{pattern:02x}: RESET_DONE=0x{done:02x}, expected 0x{expected:02x}"
+
+
+# ---------------------------------------------------------------------------
 # Standalone runner
 # ---------------------------------------------------------------------------
 
@@ -234,6 +369,6 @@ if __name__ == "__main__":
     runner.build(
         sources=[str(repo / "rtl/soc/peripheral/reset_controller.sv")],
         hdl_toplevel="reset_controller",
-        build_args=["--trace", "-Wno-fatal"],
+        build_args=["--trace-fst", "-Wno-fatal"],
     )
     runner.test(hdl_toplevel="reset_controller", test_module="test_reset_controller")

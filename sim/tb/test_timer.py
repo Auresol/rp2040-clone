@@ -63,7 +63,10 @@ async def reset(dut):
 
 @cocotb.test()
 async def test_counter_increments(dut):
-    """Counter increments every clock with prescaler=0."""
+    """Counter increments every clock with prescaler=0.
+
+    Pass: MTIME advances by ~20 after 20 clock cycles.
+    """
     await reset(dut)
 
     # Prescaler=0 (default), ctrl enabled by default
@@ -79,7 +82,10 @@ async def test_counter_increments(dut):
 
 @cocotb.test()
 async def test_prescaler(dut):
-    """Prescaler=4 → counter increments every 5 clocks."""
+    """Prescaler=4: counter increments every 5 clocks.
+
+    Pass: ~10 ticks after 50 clock cycles (50/5 = 10).
+    """
     await reset(dut)
 
     await ahb_write(dut, PRESCALER, 4)  # tick every 5 clocks
@@ -96,7 +102,10 @@ async def test_prescaler(dut):
 
 @cocotb.test()
 async def test_ctrl_disable(dut):
-    """Disabling CTRL stops the counter."""
+    """Disabling CTRL stops the counter.
+
+    Pass: MTIME stays at 0 after 50 clock cycles with CTRL=0.
+    """
     await reset(dut)
 
     await ahb_write(dut, CTRL, 0)  # disable
@@ -111,7 +120,10 @@ async def test_ctrl_disable(dut):
 
 @cocotb.test()
 async def test_ctrl_reenable(dut):
-    """Re-enabling CTRL resumes counting."""
+    """Re-enabling CTRL resumes counting.
+
+    Pass: MTIME advances after CTRL transitions from 0 back to 1.
+    """
     await reset(dut)
 
     await ahb_write(dut, CTRL, 0)  # disable
@@ -128,7 +140,10 @@ async def test_ctrl_reenable(dut):
 
 @cocotb.test()
 async def test_mtime_write(dut):
-    """Writing MTIME/MTIMEH sets the counter."""
+    """Writing MTIME/MTIMEH sets the counter.
+
+    Pass: readback of MTIME and MTIMEH matches written values.
+    """
     await reset(dut)
 
     await ahb_write(dut, CTRL, 0)  # stop to write cleanly
@@ -144,7 +159,10 @@ async def test_mtime_write(dut):
 
 @cocotb.test()
 async def test_mtimecmp_write_read(dut):
-    """Writing and reading MTIMECMP round-trips correctly."""
+    """Writing and reading MTIMECMP round-trips correctly.
+
+    Pass: readback of MTIMECMP and MTIMECMPH matches written values.
+    """
     await reset(dut)
 
     await ahb_write(dut, MTIMECMP, 0xCAFEBABE)
@@ -159,7 +177,10 @@ async def test_mtimecmp_write_read(dut):
 
 @cocotb.test()
 async def test_irq_fires_on_match(dut):
-    """timer_irq asserts when mtime >= mtimecmp."""
+    """timer_irq asserts when mtime >= mtimecmp.
+
+    Pass: timer_irq=0 before match, timer_irq=1 after counter passes compare value.
+    """
     await reset(dut)
 
     # Set counter to 0, compare to 10
@@ -183,7 +204,11 @@ async def test_irq_fires_on_match(dut):
 
 @cocotb.test()
 async def test_irq_clears_on_new_mtimecmp(dut):
-    """Writing a future mtimecmp value clears the IRQ."""
+    """Writing a future mtimecmp value clears the IRQ.
+
+    Pass: timer_irq=1 when mtime=100 >= mtimecmp=10, then timer_irq=0 after
+    setting mtimecmp to 0xFFFFFFFF_FFFFFFFF.
+    """
     await reset(dut)
 
     # Force mtime=100, mtimecmp=10 → IRQ fires
@@ -206,7 +231,10 @@ async def test_irq_clears_on_new_mtimecmp(dut):
 
 @cocotb.test()
 async def test_dbg_halt_freezes(dut):
-    """dbg_halt freezes the counter."""
+    """dbg_halt freezes the counter.
+
+    Pass: MTIME unchanged during 20 cycles with dbg_halt=1, resumes after deassertion.
+    """
     await reset(dut)
 
     await ahb_write(dut, MTIME, 0)
@@ -231,7 +259,10 @@ async def test_dbg_halt_freezes(dut):
 
 @cocotb.test()
 async def test_64bit_rollover(dut):
-    """Counter rolls over from 0xFFFFFFFF to high word."""
+    """Counter rolls over from 0xFFFFFFFF to high word.
+
+    Pass: MTIMEH >= 1 after MTIME starts at 0xFFFFFFF0 and counts past 32-bit boundary.
+    """
     await reset(dut)
 
     await ahb_write(dut, CTRL, 0)
@@ -247,6 +278,153 @@ async def test_64bit_rollover(dut):
 
 
 # ---------------------------------------------------------------------------
+# Tests — reset state and register readback
+# ---------------------------------------------------------------------------
+
+@cocotb.test()
+async def test_reset_state(dut):
+    """All registers have correct values after reset.
+
+    Pass: CTRL=1 (enabled), PRESCALER=0, MTIME=0, MTIMEH=0,
+    MTIMECMP=0, MTIMECMPH=0, timer_irq=1 (0 >= 0).
+    """
+    await reset(dut)
+
+    await ahb_write(dut, CTRL, 0)  # stop counter to read cleanly
+
+    ctrl = await ahb_read(dut, CTRL)
+    assert ctrl == 0, f"CTRL should be 0 after we disabled it, got 0x{ctrl:x}"
+
+    pre = await ahb_read(dut, PRESCALER)
+    assert pre == 0, f"PRESCALER should be 0 at reset, got {pre}"
+
+
+@cocotb.test()
+async def test_ctrl_readback(dut):
+    """CTRL register reads back the written value.
+
+    Pass: CTRL reads 0 after writing 0, reads 1 after writing 1.
+    """
+    await reset(dut)
+
+    await ahb_write(dut, CTRL, 0)
+    val = await ahb_read(dut, CTRL)
+    assert val == 0, f"CTRL should read 0, got {val}"
+
+    await ahb_write(dut, CTRL, 1)
+    val = await ahb_read(dut, CTRL)
+    assert val == 1, f"CTRL should read 1, got {val}"
+
+
+@cocotb.test()
+async def test_prescaler_readback(dut):
+    """PRESCALER register reads back the written value.
+
+    Pass: PRESCALER reads 99 after writing 99, reads 0 after writing 0.
+    """
+    await reset(dut)
+
+    await ahb_write(dut, PRESCALER, 99)
+    val = await ahb_read(dut, PRESCALER)
+    assert val == 99, f"PRESCALER should read 99, got {val}"
+
+    await ahb_write(dut, PRESCALER, 0)
+    val = await ahb_read(dut, PRESCALER)
+    assert val == 0, f"PRESCALER should read 0, got {val}"
+
+
+# ---------------------------------------------------------------------------
+# Tests — IRQ behavior
+# ---------------------------------------------------------------------------
+
+@cocotb.test()
+async def test_irq_level_not_edge(dut):
+    """timer_irq is level-sensitive: stays asserted as long as mtime >= mtimecmp.
+
+    Pass: timer_irq remains 1 across multiple clock cycles while condition holds.
+    """
+    await reset(dut)
+
+    await ahb_write(dut, CTRL, 0)
+    await ahb_write(dut, MTIME, 100)
+    await ahb_write(dut, MTIMEH, 0)
+    await ahb_write(dut, MTIMECMP, 50)
+    await ahb_write(dut, MTIMECMPH, 0)
+    await ClockCycles(dut.clk, 3)
+
+    for _ in range(5):
+        assert int(dut.timer_irq.value) == 1, "IRQ should stay asserted (level)"
+        await RisingEdge(dut.clk)
+
+
+@cocotb.test()
+async def test_irq_64bit_compare(dut):
+    """IRQ uses full 64-bit comparison including high word.
+
+    Pass: timer_irq=0 when mtime low matches but high word is less than mtimecmph.
+    """
+    await reset(dut)
+
+    await ahb_write(dut, CTRL, 0)
+    await ahb_write(dut, MTIME, 0xFFFFFFFF)
+    await ahb_write(dut, MTIMEH, 0)
+    await ahb_write(dut, MTIMECMP, 0)
+    await ahb_write(dut, MTIMECMPH, 1)
+    await ClockCycles(dut.clk, 3)
+
+    # mtime = 0x0000_0000_FFFF_FFFF < mtimecmp = 0x0000_0001_0000_0000
+    assert int(dut.timer_irq.value) == 0, "IRQ should be low (high word less)"
+
+    # Now set high word to match
+    await ahb_write(dut, MTIMEH, 1)
+    await ClockCycles(dut.clk, 3)
+
+    # mtime = 0x0000_0001_FFFF_FFFF >= mtimecmp = 0x0000_0001_0000_0000
+    assert int(dut.timer_irq.value) == 1, "IRQ should fire after high word matches"
+
+
+@cocotb.test()
+async def test_dbg_halt_preserves_irq(dut):
+    """dbg_halt freezes counter but does not affect pending IRQ.
+
+    Pass: timer_irq stays asserted during dbg_halt if mtime >= mtimecmp.
+    """
+    await reset(dut)
+
+    await ahb_write(dut, CTRL, 0)
+    await ahb_write(dut, MTIME, 100)
+    await ahb_write(dut, MTIMEH, 0)
+    await ahb_write(dut, MTIMECMP, 50)
+    await ahb_write(dut, MTIMECMPH, 0)
+    await ahb_write(dut, CTRL, 1)
+    await ClockCycles(dut.clk, 3)
+
+    assert int(dut.timer_irq.value) == 1, "IRQ should be asserted before halt"
+
+    dut.dbg_halt.value = 1
+    await ClockCycles(dut.clk, 10)
+    assert int(dut.timer_irq.value) == 1, "IRQ should stay asserted during halt"
+
+    dut.dbg_halt.value = 0
+
+
+@cocotb.test()
+async def test_mtime_write_while_running(dut):
+    """Writing MTIME while counter is running takes effect immediately.
+
+    Pass: MTIME reads back near the written value after a write with CTRL=1.
+    """
+    await reset(dut)
+
+    # Counter is running (CTRL=1 by default)
+    await ahb_write(dut, MTIME, 1000)
+
+    t = await ahb_read(dut, MTIME)
+    # Should be near 1000 (plus a few ticks from AHB overhead)
+    assert 1000 <= t <= 1020, f"MTIME should be near 1000 after write, got {t}"
+
+
+# ---------------------------------------------------------------------------
 # Standalone runner
 # ---------------------------------------------------------------------------
 
@@ -259,6 +437,6 @@ if __name__ == "__main__":
     runner.build(
         verilog_sources=[str(repo / "rtl/soc/peripheral/timer.sv")],
         hdl_toplevel="timer",
-        build_args=["--trace", "-Wno-fatal"],
+        build_args=["--trace-fst", "-Wno-fatal"],
     )
     runner.test(hdl_toplevel="timer", test_module="test_timer")

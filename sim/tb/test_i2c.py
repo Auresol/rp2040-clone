@@ -390,6 +390,331 @@ async def test_interrupt_tx_empty(dut):
 
 
 # ---------------------------------------------------------------------------
+# Tests — reset state and register readback
+# ---------------------------------------------------------------------------
+
+@cocotb.test()
+async def test_reset_state(dut):
+    """After reset, CON=0, TAR=0, SCL_HCNT=0, SCL_LCNT=0, IMSC=0.
+
+    Pass: all config registers read 0 after reset.
+    """
+    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
+
+    dut.rst_n.value = 0
+    dut.scl_i.value = 1
+    dut.sda_i.value = 1
+    dut.htrans.value = 0
+    dut.hwrite.value = 0
+    dut.haddr.value = 0
+    dut.hwdata.value = 0
+    dut.hsize.value = 2
+
+    await ClockCycles(dut.clk, 3)
+    dut.rst_n.value = 1
+    await RisingEdge(dut.clk)
+
+    con = await ahb_read(dut, CON)
+    assert con == 0, f"CON should be 0, got 0x{con:x}"
+
+    tar = await ahb_read(dut, TAR)
+    assert tar == 0, f"TAR should be 0, got 0x{tar:x}"
+
+    hcnt = await ahb_read(dut, SCL_HCNT)
+    assert hcnt == 0, f"SCL_HCNT should be 0, got {hcnt}"
+
+    lcnt = await ahb_read(dut, SCL_LCNT)
+    assert lcnt == 0, f"SCL_LCNT should be 0, got {lcnt}"
+
+    imsc = await ahb_read(dut, IMSC)
+    assert imsc == 0, f"IMSC should be 0, got 0x{imsc:x}"
+
+
+@cocotb.test()
+async def test_register_readback(dut):
+    """Config registers round-trip correctly.
+
+    Pass: CON, TAR, SCL_HCNT, SCL_LCNT, IMSC read back written values.
+    """
+    await reset_and_init(dut, target=0x50)
+
+    slave = I2CSlave(dut, addr=0x50)
+    slave.start()
+
+    con = await ahb_read(dut, CON)
+    assert con == 1, f"CON should be 1 (enabled), got {con}"
+
+    tar = await ahb_read(dut, TAR)
+    assert tar == 0x50, f"TAR should be 0x50, got 0x{tar:02x}"
+
+    hcnt = await ahb_read(dut, SCL_HCNT)
+    assert hcnt == SCL_H, f"SCL_HCNT should be {SCL_H}, got {hcnt}"
+
+    lcnt = await ahb_read(dut, SCL_LCNT)
+    assert lcnt == SCL_L, f"SCL_LCNT should be {SCL_L}, got {lcnt}"
+
+    await ahb_write(dut, IMSC, 0x7)
+    imsc = await ahb_read(dut, IMSC)
+    assert imsc == 0x7, f"IMSC should be 0x7, got 0x{imsc:x}"
+
+
+# ---------------------------------------------------------------------------
+# Tests — interrupt behavior
+# ---------------------------------------------------------------------------
+
+@cocotb.test()
+async def test_interrupt_rx_data(dut):
+    """RX data interrupt fires when RX FIFO has data.
+
+    Pass: RIS bit 1 set after a read completes, i2c_irq asserts when masked in.
+    """
+    await reset_and_init(dut, target=0x50)
+
+    slave = I2CSlave(dut, addr=0x50, read_data=[0x42])
+    slave.start()
+
+    # Enable RX data interrupt (bit 1)
+    await ahb_write(dut, IMSC, 0x2)
+
+    await ahb_write(dut, DATA_CMD, CMD_READ | CMD_STOP)
+    await wait_idle(dut)
+
+    ris = await ahb_read(dut, RIS)
+    assert ris & 0x2, f"RX data RIS should be set, RIS=0x{ris:x}"
+    assert int(dut.i2c_irq.value) == 1, "i2c_irq should assert with RX data masked in"
+
+
+@cocotb.test()
+async def test_interrupt_nack(dut):
+    """NACK interrupt fires on address NACK.
+
+    Pass: RIS bit 2 set after NACK, i2c_irq asserts when masked in.
+    """
+    await reset_and_init(dut, target=0x50)
+
+    # Slave at different address → NACK
+    slave = I2CSlave(dut, addr=0x60)
+    slave.start()
+
+    await ahb_write(dut, IMSC, 0x4)  # NACK interrupt mask
+
+    await ahb_write(dut, DATA_CMD, CMD_WRITE | CMD_STOP | 0x00)
+    await wait_idle(dut)
+
+    ris = await ahb_read(dut, RIS)
+    assert ris & 0x4, f"NACK RIS should be set, RIS=0x{ris:x}"
+    assert int(dut.i2c_irq.value) == 1, "i2c_irq should assert on NACK"
+
+
+@cocotb.test()
+async def test_mis_equals_ris_and_imsc(dut):
+    """MIS = RIS & IMSC.
+
+    Pass: MIS reflects only the masked-in interrupts.
+    """
+    await reset_and_init(dut, target=0x50)
+
+    slave = I2CSlave(dut, addr=0x50)
+    slave.start()
+    await ClockCycles(dut.clk, 4)
+
+    # TX empty should be in RIS (FIFO is empty)
+    ris = await ahb_read(dut, RIS)
+    assert ris & 0x1, f"TX empty should be set, RIS=0x{ris:x}"
+
+    # With IMSC=0, MIS should be 0
+    mis = await ahb_read(dut, MIS)
+    assert mis == 0, f"MIS should be 0 with IMSC=0, got 0x{mis:x}"
+
+    # Enable TX empty mask
+    await ahb_write(dut, IMSC, 0x1)
+    mis = await ahb_read(dut, MIS)
+    assert mis & 0x1, f"MIS should have TX empty, got 0x{mis:x}"
+
+
+@cocotb.test()
+async def test_irq_deasserts_on_mask_clear(dut):
+    """Clearing IMSC deasserts i2c_irq even if RIS is still set.
+
+    Pass: i2c_irq goes low after IMSC cleared to 0.
+    """
+    await reset_and_init(dut, target=0x50)
+
+    slave = I2CSlave(dut, addr=0x50)
+    slave.start()
+
+    await ahb_write(dut, IMSC, 0x1)  # TX empty
+    await ClockCycles(dut.clk, 4)
+    assert int(dut.i2c_irq.value) == 1, "IRQ should be asserted"
+
+    await ahb_write(dut, IMSC, 0x0)
+    await RisingEdge(dut.clk)
+    assert int(dut.i2c_irq.value) == 0, "IRQ should deassert after mask clear"
+
+
+# ---------------------------------------------------------------------------
+# Tests — STATUS flags
+# ---------------------------------------------------------------------------
+
+@cocotb.test()
+async def test_status_active_during_transfer(dut):
+    """MST_ACTIVE is set while I2C engine is busy.
+
+    Pass: MST_ACTIVE set after queueing a command, cleared after completion.
+    """
+    await reset_and_init(dut, target=0x50)
+
+    slave = I2CSlave(dut, addr=0x50)
+    slave.start()
+
+    await ahb_write(dut, DATA_CMD, CMD_WRITE | CMD_STOP | 0x55)
+
+    # Should be active shortly after
+    await ClockCycles(dut.clk, 4)
+    st = await ahb_read(dut, STATUS)
+    assert st & MST_ACTIVE, f"should be active during transfer, STATUS=0x{st:02x}"
+
+    await wait_idle(dut)
+    st = await ahb_read(dut, STATUS)
+    assert not (st & MST_ACTIVE), f"should be idle after completion, STATUS=0x{st:02x}"
+
+
+@cocotb.test()
+async def test_status_rfne_after_read(dut):
+    """RFNE (RX FIFO not empty) set after reading data from slave.
+
+    Pass: RFNE set after read, cleared after draining RX FIFO.
+    """
+    await reset_and_init(dut, target=0x50)
+
+    slave = I2CSlave(dut, addr=0x50, read_data=[0x77])
+    slave.start()
+
+    await ahb_write(dut, DATA_CMD, CMD_READ | CMD_STOP)
+    await wait_idle(dut)
+
+    st = await ahb_read(dut, STATUS)
+    assert st & RFNE, f"RFNE should be set, STATUS=0x{st:02x}"
+
+    # Drain RX FIFO
+    await ahb_read(dut, DATA_CMD)
+    await RisingEdge(dut.clk)  # dequeue propagates
+
+    st = await ahb_read(dut, STATUS)
+    assert not (st & RFNE), f"RFNE should be clear after drain, STATUS=0x{st:02x}"
+
+
+# ---------------------------------------------------------------------------
+# Tests — multi-byte and edge cases
+# ---------------------------------------------------------------------------
+
+@cocotb.test()
+async def test_write_three_bytes(dut):
+    """Write three bytes in one transaction.
+
+    Pass: slave receives all three bytes in order.
+    """
+    await reset_and_init(dut, target=0x50)
+
+    slave = I2CSlave(dut, addr=0x50)
+    slave.start()
+
+    await ahb_write(dut, DATA_CMD, CMD_WRITE | 0xAA)
+    await ahb_write(dut, DATA_CMD, CMD_WRITE | 0xBB)
+    await ahb_write(dut, DATA_CMD, CMD_WRITE | CMD_STOP | 0xCC)
+    await wait_idle(dut)
+
+    st = await ahb_read(dut, STATUS)
+    assert not (st & NACK_ERR), f"unexpected NACK, STATUS=0x{st:02x}"
+    assert slave.written == [0xAA, 0xBB, 0xCC], f"expected [0xAA, 0xBB, 0xCC], got {slave.written}"
+
+
+@cocotb.test()
+async def test_read_three_bytes(dut):
+    """Read three bytes from slave in one transaction.
+
+    Pass: RX FIFO returns all three bytes in order.
+    """
+    await reset_and_init(dut, target=0x50)
+
+    slave = I2CSlave(dut, addr=0x50, read_data=[0x11, 0x22, 0x33])
+    slave.start()
+
+    await ahb_write(dut, DATA_CMD, CMD_READ)
+    await ahb_write(dut, DATA_CMD, CMD_READ)
+    await ahb_write(dut, DATA_CMD, CMD_READ | CMD_STOP)
+    await wait_idle(dut)
+
+    for i, exp in enumerate([0x11, 0x22, 0x33]):
+        val = await ahb_read(dut, DATA_CMD)
+        assert (val & 0xFF) == exp, f"byte {i}: expected 0x{exp:02x}, got 0x{val & 0xFF:02x}"
+
+
+@cocotb.test()
+async def test_different_target_address(dut):
+    """I2C works with a different slave address.
+
+    Pass: write to slave at 0x68 succeeds.
+    """
+    await reset_and_init(dut, target=0x68)
+
+    slave = I2CSlave(dut, addr=0x68)
+    slave.start()
+
+    await ahb_write(dut, DATA_CMD, CMD_WRITE | CMD_STOP | 0x42)
+    await wait_idle(dut)
+
+    st = await ahb_read(dut, STATUS)
+    assert not (st & NACK_ERR), f"unexpected NACK, STATUS=0x{st:02x}"
+    assert 0x42 in slave.written, f"slave should have received 0x42, got {slave.written}"
+
+
+@cocotb.test()
+async def test_back_to_back_transactions(dut):
+    """Two separate write transactions back-to-back.
+
+    Pass: both transactions complete without error, slave receives all data.
+    """
+    await reset_and_init(dut, target=0x50)
+
+    slave = I2CSlave(dut, addr=0x50)
+    slave.start()
+
+    # First transaction
+    await ahb_write(dut, DATA_CMD, CMD_WRITE | CMD_STOP | 0x11)
+    await wait_idle(dut)
+
+    # Second transaction
+    await ahb_write(dut, DATA_CMD, CMD_WRITE | CMD_STOP | 0x22)
+    await wait_idle(dut)
+
+    st = await ahb_read(dut, STATUS)
+    assert not (st & NACK_ERR), f"unexpected NACK, STATUS=0x{st:02x}"
+    assert slave.written == [0x11, 0x22], f"expected [0x11, 0x22], got {slave.written}"
+
+
+@cocotb.test()
+async def test_disabled_no_transfer(dut):
+    """When CON=0 (disabled), queued commands do not start.
+
+    Pass: MST_ACTIVE stays low and TX FIFO drains without I2C activity.
+    """
+    await reset_and_init(dut, target=0x50)
+
+    slave = I2CSlave(dut, addr=0x50)
+    slave.start()
+
+    # Disable master
+    await ahb_write(dut, CON, 0)
+    await ahb_write(dut, DATA_CMD, CMD_WRITE | CMD_STOP | 0xFF)
+    await ClockCycles(dut.clk, 40)
+
+    st = await ahb_read(dut, STATUS)
+    assert not (st & MST_ACTIVE), f"should not be active when disabled, STATUS=0x{st:02x}"
+    assert len(slave.written) == 0, f"slave should not receive data when disabled, got {slave.written}"
+
+
+# ---------------------------------------------------------------------------
 # Standalone runner
 # ---------------------------------------------------------------------------
 
@@ -402,6 +727,6 @@ if __name__ == "__main__":
     runner.build(
         verilog_sources=[str(repo / "rtl/soc/peripheral/i2c.sv")],
         hdl_toplevel="i2c",
-        build_args=["--trace", "-Wno-fatal"],
+        build_args=["--trace-fst", "-Wno-fatal"],
     )
     runner.test(hdl_toplevel="i2c", test_module="test_i2c")

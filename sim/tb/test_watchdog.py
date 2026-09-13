@@ -256,7 +256,7 @@ if __name__ == "__main__":
     runner.build(
         sources=[str(repo / "rtl/soc/peripheral/watchdog.sv")],
         hdl_toplevel="watchdog",
-        build_args=["--trace", "-Wno-fatal"],
+        build_args=["--trace-fst", "-Wno-fatal"],
         parameters={"CLK_HZ": 10_000_000},
     )
     runner.test(hdl_toplevel="watchdog", test_module="test_watchdog")

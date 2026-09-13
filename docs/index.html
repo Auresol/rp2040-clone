@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>rxpsm32 — SoC documentation</title>
+<style>
+:root {
+  --bg: #1e1e1e; --bg2: #252526; --bg3: #2a2a2a;
+  --fg: #d4d4d4; --fg2: #aaa; --fg3: #666;
+  --accent: #4ec9b0; --blue: #9cdcfe; --orange: #ce9178;
+  --border: #333;
+}
+* { box-sizing: border-box; }
+body {
+  font-family: 'Consolas', 'Menlo', monospace;
+  background: var(--bg); color: var(--fg); font-size: 14px;
+  margin: 0; padding: 0; display: flex; min-height: 100vh;
+}
+
+/* --- Sidebar --- */
+.sidebar {
+  width: 240px; min-width: 240px; background: #181818;
+  border-right: 1px solid var(--border); padding: 16px 0;
+  position: fixed; top: 0; bottom: 0; overflow-y: auto;
+}
+.sidebar h2 {
+  color: var(--fg3); font-size: 0.75em; text-transform: uppercase;
+  letter-spacing: 1.5px; padding: 12px 16px 4px; margin: 0;
+  border: none;
+}
+.sidebar a {
+  display: block; padding: 4px 16px 4px 24px; color: var(--fg2);
+  text-decoration: none; font-size: 0.92em;
+}
+.sidebar a:hover { background: var(--bg3); color: var(--fg); }
+.sidebar a.active { color: var(--accent); background: var(--bg2); border-left: 2px solid var(--accent); padding-left: 22px; }
+.sidebar .title {
+  padding: 12px 16px; font-size: 1.1em; color: var(--blue);
+  font-weight: bold; border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+
+/* --- Main content --- */
+.main {
+  margin-left: 240px; padding: 32px 40px; max-width: 900px; width: 100%;
+}
+h1  { color: var(--blue); margin-bottom: 4px; }
+h2  { color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+h4  { color: var(--orange); margin: 12px 0 4px; }
+p   { margin: 6px 0; }
+code { color: var(--orange); }
+a   { color: var(--accent); }
+
+details { margin: 10px 0; border: 1px solid var(--border); border-radius: 5px; }
+summary {
+  padding: 9px 14px; cursor: pointer; font-size: 1.05em;
+  color: var(--accent); background: var(--bg2); border-radius: 5px;
+  user-select: none; list-style: none;
+}
+summary:hover { background: var(--bg3); }
+.body { padding: 12px 18px; }
+
+table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+th    { background: var(--bg2); color: var(--blue); text-align: left; padding: 6px 10px; }
+td    { padding: 5px 10px; border-bottom: 1px solid var(--bg3); vertical-align: top; }
+tr:hover td { background: var(--bg2); }
+
+.badge {
+  display: inline-block; padding: 1px 8px; border-radius: 3px;
+  font-size: 0.82em; font-weight: bold; margin-left: 8px;
+}
+.pass    { background: #1e5c1e; color: #6fcc6f; }
+.fail    { background: #5c1e1e; color: #f07070; }
+.skip    { background: #3a3a3a; color: #888; }
+.unknown { background: #2a2a2a; color: #666; }
+
+.test  { border-left: 3px solid var(--border); padding: 7px 12px; margin: 7px 0; }
+.test:hover { border-left-color: var(--accent); background: #232323; }
+.test-name { margin-bottom: 3px; }
+.test p  { color: var(--fg2); margin: 3px 0; font-size: 0.92em; }
+.cond    { color: var(--fg3) !important; }
+.cond strong { color: #888; }
+
+.always { border-left: 3px solid var(--accent); padding: 5px 12px; margin: 6px 0; }
+.always p { color: #777; margin: 3px 0; }
+
+.key-pill {
+  display: inline-block; background: #2a3a2a; color: #6fcc6f;
+  border: 1px solid #3a5a3a; border-radius: 3px; padding: 2px 8px;
+  margin: 3px; font-size: 0.9em;
+}
+.fanout { color: #555; font-size: 0.85em; margin-left: 4px; }
+
+/* --- Index page --- */
+.index-grid {
+  display: grid; grid-template-columns: 1fr; gap: 8px; margin: 8px 0;
+}
+.mod-card {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 5px; text-decoration: none; color: var(--fg);
+}
+.mod-card:hover { border-color: var(--accent); background: var(--bg3); }
+.mod-card .name { color: var(--accent); font-weight: bold; min-width: 160px; }
+.mod-card .desc { color: var(--fg2); font-size: 0.9em; }
+.mod-count { color: var(--fg3); font-size: 0.85em; margin-left: auto; white-space: nowrap; }
+</style>
+</head>
+<body>
+<nav class="sidebar">
+<div class="title"><a href="index.html" style="color:inherit;text-decoration:none">rxpsm32</a></div>
+<h2>Peripheral</h2>
+<a href="doc_uart.html">uart</a>
+<a href="doc_spi.html">spi</a>
+<a href="doc_gpio.html">gpio</a>
+<a href="doc_i2c.html">i2c</a>
+<a href="doc_dma.html">dma</a>
+<a href="doc_timer.html">timer</a>
+<a href="doc_watchdog.html">watchdog</a>
+<a href="doc_reset_controller.html">reset_controller</a>
+<a href="doc_sysinfo.html">sysinfo</a>
+<a href="doc_pio_top.html">pio_top</a>
+<a href="doc_pio_sm.html">pio_sm</a>
+<a href="doc_pio_fifo.html">pio_fifo</a>
+<h2>Fabric</h2>
+<a href="doc_ahb_arbiter.html">ahb_arbiter</a>
+<a href="doc_ahb_i_decoder.html">ahb_i_decoder</a>
+<a href="doc_ahb_d_decoder.html">ahb_d_decoder</a>
+<h2>Memory</h2>
+<a href="doc_sram_top.html">sram_top</a>
+<a href="doc_sram_bank.html">sram_bank</a>
+
+</nav>
+<div class="main">
+<h1>rxpsm32 SoC</h1>
+<p style="color:#555">RISC-V SoC documentation &nbsp;&middot;&nbsp; Generated 2026-09-14</p>
+<h2>Peripheral</h2>
+<div class="index-grid">
+<a class="mod-card" href="doc_uart.html"><span class="name">uart</span><span class="desc">AHB-Lite UART peripheral (8N1, TX+RX, configurable baud).</span><span class="mod-count">31 tests</span></a>
+<a class="mod-card" href="doc_spi.html"><span class="name">spi</span><span class="desc">AHB-Lite SPI master peripheral (PL022-compatible subset).</span><span class="mod-count">no tests</span></a>
+<a class="mod-card" href="doc_gpio.html"><span class="name">gpio</span><span class="desc">SIO-style GPIO with atomic SET/CLR/XOR and output enable.</span><span class="mod-count">no tests</span></a>
+<a class="mod-card" href="doc_i2c.html"><span class="name">i2c</span><span class="desc">AHB-Lite I2C master peripheral.</span><span class="mod-count">no tests</span></a>
+<a class="mod-card" href="doc_dma.html"><span class="name">dma</span><span class="desc">4-channel DMA controller with AHB-Lite slave + master ports.</span><span class="mod-count">no tests</span></a>
+<a class="mod-card" href="doc_timer.html"><span class="name">timer</span><span class="desc">AHB-Lite RISC-V mtime/mtimecmp timer peripheral.</span><span class="mod-count">no tests</span></a>
+<a class="mod-card" href="doc_watchdog.html"><span class="name">watchdog</span><span class="desc">Watchdog timer with 1 MHz tick output.</span><span class="mod-count">no tests</span></a>
+<a class="mod-card" href="doc_reset_controller.html"><span class="name">reset_controller</span><span class="desc">Per-peripheral reset control with multiple reset sources.</span><span class="mod-count">no tests</span></a>
+<a class="mod-card" href="doc_sysinfo.html"><span class="name">sysinfo</span><span class="desc">Read-only system identification registers.</span><span class="mod-count">no tests</span></a>
+<a class="mod-card" href="doc_pio_top.html"><span class="name">pio_top</span><span class="desc">RP2040 PIO block top-level (one of two identical blocks)</span><span class="mod-count">no tests</span></a>
+<a class="mod-card" href="doc_pio_sm.html"><span class="name">pio_sm</span><span class="desc">RP2040 PIO State Machine (single instance)</span><span class="mod-count">no tests</span></a>
+<a class="mod-card" href="doc_pio_fifo.html"><span class="name">pio_fifo</span><span class="desc">PIO synchronous FIFO</span><span class="mod-count">no tests</span></a>
+</div>
+<h2>Fabric</h2>
+<div class="index-grid">
+<a class="mod-card" href="doc_ahb_arbiter.html"><span class="name">ahb_arbiter</span><span class="desc">2-master, 1-slave AHB-Lite arbiter.</span><span class="mod-count">no tests</span></a>
+<a class="mod-card" href="doc_ahb_i_decoder.html"><span class="name">ahb_i_decoder</span><span class="desc">1-master, 2-slave AHB-Lite instruction-port decoder.</span><span class="mod-count">no tests</span></a>
+<a class="mod-card" href="doc_ahb_d_decoder.html"><span class="name">ahb_d_decoder</span><span class="desc">1-master, 10-slave AHB-Lite data-port decoder.</span><span class="mod-count">no tests</span></a>
+</div>
+<h2>Memory</h2>
+<div class="index-grid">
+<a class="mod-card" href="doc_sram_top.html"><span class="name">sram_top</span><span class="desc">Memory subsystem top.</span><span class="mod-count">no tests</span></a>
+<a class="mod-card" href="doc_sram_bank.html"><span class="name">sram_bank</span><span class="desc">Single SRAM bank with separate instruction (read-only) and data (read/write)</span><span class="mod-count">no tests</span></a>
+</div>
+
+</div>
+</body>
+</html>

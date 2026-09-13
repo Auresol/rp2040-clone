@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>gpio — rxpsm32 docs</title>
+<style>
+:root {
+  --bg: #1e1e1e; --bg2: #252526; --bg3: #2a2a2a;
+  --fg: #d4d4d4; --fg2: #aaa; --fg3: #666;
+  --accent: #4ec9b0; --blue: #9cdcfe; --orange: #ce9178;
+  --border: #333;
+}
+* { box-sizing: border-box; }
+body {
+  font-family: 'Consolas', 'Menlo', monospace;
+  background: var(--bg); color: var(--fg); font-size: 14px;
+  margin: 0; padding: 0; display: flex; min-height: 100vh;
+}
+
+/* --- Sidebar --- */
+.sidebar {
+  width: 240px; min-width: 240px; background: #181818;
+  border-right: 1px solid var(--border); padding: 16px 0;
+  position: fixed; top: 0; bottom: 0; overflow-y: auto;
+}
+.sidebar h2 {
+  color: var(--fg3); font-size: 0.75em; text-transform: uppercase;
+  letter-spacing: 1.5px; padding: 12px 16px 4px; margin: 0;
+  border: none;
+}
+.sidebar a {
+  display: block; padding: 4px 16px 4px 24px; color: var(--fg2);
+  text-decoration: none; font-size: 0.92em;
+}
+.sidebar a:hover { background: var(--bg3); color: var(--fg); }
+.sidebar a.active { color: var(--accent); background: var(--bg2); border-left: 2px solid var(--accent); padding-left: 22px; }
+.sidebar .title {
+  padding: 12px 16px; font-size: 1.1em; color: var(--blue);
+  font-weight: bold; border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+
+/* --- Main content --- */
+.main {
+  margin-left: 240px; padding: 32px 40px; max-width: 900px; width: 100%;
+}
+h1  { color: var(--blue); margin-bottom: 4px; }
+h2  { color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+h4  { color: var(--orange); margin: 12px 0 4px; }
+p   { margin: 6px 0; }
+code { color: var(--orange); }
+a   { color: var(--accent); }
+
+details { margin: 10px 0; border: 1px solid var(--border); border-radius: 5px; }
+summary {
+  padding: 9px 14px; cursor: pointer; font-size: 1.05em;
+  color: var(--accent); background: var(--bg2); border-radius: 5px;
+  user-select: none; list-style: none;
+}
+summary:hover { background: var(--bg3); }
+.body { padding: 12px 18px; }
+
+table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+th    { background: var(--bg2); color: var(--blue); text-align: left; padding: 6px 10px; }
+td    { padding: 5px 10px; border-bottom: 1px solid var(--bg3); vertical-align: top; }
+tr:hover td { background: var(--bg2); }
+
+.badge {
+  display: inline-block; padding: 1px 8px; border-radius: 3px;
+  font-size: 0.82em; font-weight: bold; margin-left: 8px;
+}
+.pass    { background: #1e5c1e; color: #6fcc6f; }
+.fail    { background: #5c1e1e; color: #f07070; }
+.skip    { background: #3a3a3a; color: #888; }
+.unknown { background: #2a2a2a; color: #666; }
+
+.test  { border-left: 3px solid var(--border); padding: 7px 12px; margin: 7px 0; }
+.test:hover { border-left-color: var(--accent); background: #232323; }
+.test-name { margin-bottom: 3px; }
+.test p  { color: var(--fg2); margin: 3px 0; font-size: 0.92em; }
+.cond    { color: var(--fg3) !important; }
+.cond strong { color: #888; }
+
+.always { border-left: 3px solid var(--accent); padding: 5px 12px; margin: 6px 0; }
+.always p { color: #777; margin: 3px 0; }
+
+.key-pill {
+  display: inline-block; background: #2a3a2a; color: #6fcc6f;
+  border: 1px solid #3a5a3a; border-radius: 3px; padding: 2px 8px;
+  margin: 3px; font-size: 0.9em;
+}
+.fanout { color: #555; font-size: 0.85em; margin-left: 4px; }
+
+/* --- Index page --- */
+.index-grid {
+  display: grid; grid-template-columns: 1fr; gap: 8px; margin: 8px 0;
+}
+.mod-card {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 5px; text-decoration: none; color: var(--fg);
+}
+.mod-card:hover { border-color: var(--accent); background: var(--bg3); }
+.mod-card .name { color: var(--accent); font-weight: bold; min-width: 160px; }
+.mod-card .desc { color: var(--fg2); font-size: 0.9em; }
+.mod-count { color: var(--fg3); font-size: 0.85em; margin-left: auto; white-space: nowrap; }
+</style>
+</head>
+<body>
+<nav class="sidebar">
+<div class="title"><a href="index.html" style="color:inherit;text-decoration:none">rxpsm32</a></div>
+<h2>Peripheral</h2>
+<a href="doc_uart.html">uart</a>
+<a href="doc_spi.html">spi</a>
+<a href="doc_gpio.html" class="active">gpio</a>
+<a href="doc_i2c.html">i2c</a>
+<a href="doc_dma.html">dma</a>
+<a href="doc_timer.html">timer</a>
+<a href="doc_watchdog.html">watchdog</a>
+<a href="doc_reset_controller.html">reset_controller</a>
+<a href="doc_sysinfo.html">sysinfo</a>
+<a href="doc_pio_top.html">pio_top</a>
+<a href="doc_pio_sm.html">pio_sm</a>
+<a href="doc_pio_fifo.html">pio_fifo</a>
+<h2>Fabric</h2>
+<a href="doc_ahb_arbiter.html">ahb_arbiter</a>
+<a href="doc_ahb_i_decoder.html">ahb_i_decoder</a>
+<a href="doc_ahb_d_decoder.html">ahb_d_decoder</a>
+<h2>Memory</h2>
+<a href="doc_sram_top.html">sram_top</a>
+<a href="doc_sram_bank.html">sram_bank</a>
+
+</nav>
+<div class="main">
+<h1>gpio.sv</h1>
+<p style="color:#555">SIO-style GPIO with atomic SET/CLR/XOR and output enable. &nbsp;&middot;&nbsp; Generated 2026-09-14</p>
+
+<details open><summary>Module header</summary><div class="body"><pre style="color:#888;font-size:0.9em;line-height:1.5;margin:8px 0;white-space:pre-wrap">gpio.sv — SIO-style GPIO with atomic SET/CLR/XOR and output enable.
+
+Base address: caller-defined (decoder handles base; offsets below are relative).
+
+Modelled after the RP2040 SIO GPIO registers. The SIO block is a custom
+Raspberry Pi design — it does NOT follow any ARM standard (not PL061).
+
+Register map (byte offset from base):
+0x00  GPIO_IN       [31:0]  pad input levels (read-only, directly sampled)
+0x04  GPIO_OUT      [31:0]  output level latch (read/write)
+0x08  GPIO_OUT_SET  [31:0]  atomic bit-set on GPIO_OUT (write-only, reads as GPIO_OUT)
+0x0C  GPIO_OUT_CLR  [31:0]  atomic bit-clear on GPIO_OUT (write-only, reads as GPIO_OUT)
+0x10  GPIO_OUT_XOR  [31:0]  atomic bit-toggle on GPIO_OUT (write-only, reads as GPIO_OUT)
+0x14  GPIO_OE       [31:0]  output enable (1=output, 0=input) (read/write)
+0x18  GPIO_OE_SET   [31:0]  atomic bit-set on GPIO_OE (write-only, reads as GPIO_OE)
+0x1C  GPIO_OE_CLR   [31:0]  atomic bit-clear on GPIO_OE (write-only, reads as GPIO_OE)
+0x20  GPIO_OE_XOR   [31:0]  atomic bit-toggle on GPIO_OE (write-only, reads as GPIO_OE)
+
+The SET/CLR/XOR aliases let firmware do atomic bit manipulation without
+read-modify-write, which matters for concurrent access from two cores.
+
+Not implemented (RP2040 SIO/IO_BANK0/PADS differences):
+IO_BANK0 FUNCSEL     — per-pin function mux (GPIO/UART/SPI/PIO); handled
+at SoC level by the bus decoder and PIO GPIO mux
+IO_BANK0 overrides   — OUTOVER, OEOVER, INOVER, IRQOVER per pin
+IO_BANK0 interrupts  — per-pin edge/level detect, per-core IRQ routing
+PADS_BANK0           — drive strength, slew rate, pull-up/down, schmitt,
+input enable (ASIC-only, no effect on FPGA)
+GPIO_HI_*            — QSPI pin GPIO aliases (not applicable)
+
+Known limitations:
+- gpio_in is sampled directly (no 2-FF synchronizer); add one if inputs
+come from an asynchronous domain (e.g. external pins)
+- No per-pin function mux: all 32 bits are GPIO; peripheral pin routing
+is fixed at the SoC level
+- No interrupt generation (level/edge detect not implemented)
+- SET/CLR/XOR reads return the base register value (matches RP2040 SIO)
+
+AHB pipeline: address phase registers htrans/hwrite/haddr; data phase captures
+hwdata for writes and returns hrdata combinationally for reads.</pre></div></details>
+
+<details><summary>Key signals</summary><div class="body"><p style="color:#666;margin-bottom:10px">Ranked by fanout — how many logic cells read this signal.</p><span class="key-pill"><code>wr</code><span class="fanout">(2)</span></span></div></details>
+
+<details open><summary>Registers</summary><div class="body"><table><tr><th>Name</th><th>Description</th></tr><tr><td><code>reg_addr_r</code></td><td>word address: 0x00–0x20 → 0–8</td></tr></table></div></details>
+
+<details><summary>Address decoder</summary><div class="body"><p style="color:#666"><em>No address parameters found.</em></p></div></details>
+
+<details><summary>FSM states &amp; constants</summary><div class="body"><p style="color:#666"><em>No FSM states or constants found.</em></p></div></details>
+
+<details><summary>Combinational logic</summary><div class="body"><table><tr><th>Signal</th><th>Expression</th><th>Description</th></tr><tr><td><code>active</code></td><td><code title="htrans[1]">htrans[1]</code></td><td><em>-</em></td></tr><tr><td><code>wr</code></td><td><code title="active_r && hwrite_r">active_r && hwrite_r</code></td><td><em>-</em></td></tr><tr><td><code>hready</code></td><td><code title="1'b1">1'b1</code></td><td><em>-</em></td></tr><tr><td><code>hresp</code></td><td><code title="1'b0">1'b0</code></td><td><em>-</em></td></tr></table></div></details>
+
+<details><summary>Always blocks</summary><div class="body"><div class="always"><code>always @(posedge clk) begin</code></div><div class="always"><code>always @(posedge clk or negedge rst_n) begin</code></div></div></details>
+
+<details><summary>Tests (39)</summary><div class="body"><p style="color:#888">39 tests &mdash; 0 pass &nbsp; 0 fail &nbsp; 0 skip &nbsp; 39 not run</p><div class="test"><div class="test-name"><code>test_reset_state</code><span class="badge unknown">?</span></div><p>After reset, GPIO_OUT and GPIO_OE are both 0.
+Pass: reading GPIO_OUT and GPIO_OE returns 0x00000000.</p></div><div class="test"><div class="test-name"><code>test_gpio_out_write_read</code><span class="badge unknown">?</span></div><p>GPIO_OUT is read/write.
+Pass: value written to GPIO_OUT reads back correctly.</p></div><div class="test"><div class="test-name"><code>test_gpio_out_drives_pin</code><span class="badge unknown">?</span></div><p>gpio_out output port tracks the GPIO_OUT register.
+Pass: gpio_out matches written value after register update propagates.</p></div><div class="test"><div class="test-name"><code>test_gpio_in_reads_pads</code><span class="badge unknown">?</span></div><p>GPIO_IN reads the current gpio_in input value.
+Pass: GPIO_IN returns the value driven on gpio_in pins.</p></div><div class="test"><div class="test-name"><code>test_gpio_in_changes</code><span class="badge unknown">?</span></div><p>GPIO_IN tracks changes on gpio_in pins.
+Pass: two successive reads return different values when gpio_in changes.</p></div><div class="test"><div class="test-name"><code>test_out_set</code><span class="badge unknown">?</span></div><p>GPIO_OUT_SET atomically sets bits in GPIO_OUT.
+Pass: only targeted bits are set; other bits unchanged.</p></div><div class="test"><div class="test-name"><code>test_out_clr</code><span class="badge unknown">?</span></div><p>GPIO_OUT_CLR atomically clears bits in GPIO_OUT.
+Pass: only targeted bits are cleared; other bits unchanged.</p></div><div class="test"><div class="test-name"><code>test_out_xor</code><span class="badge unknown">?</span></div><p>GPIO_OUT_XOR atomically toggles bits in GPIO_OUT.
+Pass: targeted bits are inverted; other bits unchanged.</p></div><div class="test"><div class="test-name"><code>test_out_set_read_returns_out</code><span class="badge unknown">?</span></div><p>Reading GPIO_OUT_SET returns GPIO_OUT value (not the SET mask).
+Pass: read from SET alias matches GPIO_OUT.</p></div><div class="test"><div class="test-name"><code>test_oe_write_read</code><span class="badge unknown">?</span></div><p>GPIO_OE is read/write.
+Pass: value written to GPIO_OE reads back correctly.</p></div><div class="test"><div class="test-name"><code>test_oe_drives_pin</code><span class="badge unknown">?</span></div><p>gpio_oe output port tracks the GPIO_OE register.
+Pass: gpio_oe matches written value after register update propagates.</p></div><div class="test"><div class="test-name"><code>test_oe_set</code><span class="badge unknown">?</span></div><p>GPIO_OE_SET atomically sets bits in GPIO_OE.
+Pass: only targeted bits are set.</p></div><div class="test"><div class="test-name"><code>test_oe_clr</code><span class="badge unknown">?</span></div><p>GPIO_OE_CLR atomically clears bits in GPIO_OE.
+Pass: only targeted bits are cleared.</p></div><div class="test"><div class="test-name"><code>test_oe_xor</code><span class="badge unknown">?</span></div><p>GPIO_OE_XOR atomically toggles bits in GPIO_OE.
+Pass: targeted bits are inverted.</p></div><div class="test"><div class="test-name"><code>test_oe_set_read_returns_oe</code><span class="badge unknown">?</span></div><p>Reading GPIO_OE_SET returns GPIO_OE value.
+Pass: read from OE_SET alias matches GPIO_OE.</p></div><div class="test"><div class="test-name"><code>test_out_and_oe_independent</code><span class="badge unknown">?</span></div><p>Writing GPIO_OUT does not affect GPIO_OE and vice versa.
+Pass: each register retains its value after the other is written.</p></div><div class="test"><div class="test-name"><code>test_set_clr_sequence</code><span class="badge unknown">?</span></div><p>SET then CLR on the same bits cancels out.
+Pass: GPIO_OUT returns to original value after SET then CLR of same mask.</p></div><div class="test"><div class="test-name"><code>test_xor_twice_restores</code><span class="badge unknown">?</span></div><p>XOR applied twice restores the original value.
+Pass: GPIO_OUT unchanged after two identical XOR writes.</p></div><div class="test"><div class="test-name"><code>test_gpio_in_readonly</code><span class="badge unknown">?</span></div><p>Writing to GPIO_IN has no effect (read-only register).
+Pass: gpio_out unchanged after writing to GPIO_IN address.</p></div><div class="test"><div class="test-name"><code>test_out_clr_read_returns_out</code><span class="badge unknown">?</span></div><p>Reading GPIO_OUT_CLR returns GPIO_OUT value.
+Pass: read from CLR alias matches GPIO_OUT.</p></div><div class="test"><div class="test-name"><code>test_out_xor_read_returns_out</code><span class="badge unknown">?</span></div><p>Reading GPIO_OUT_XOR returns GPIO_OUT value.
+Pass: read from XOR alias matches GPIO_OUT.</p></div><div class="test"><div class="test-name"><code>test_oe_clr_read_returns_oe</code><span class="badge unknown">?</span></div><p>Reading GPIO_OE_CLR returns GPIO_OE value.
+Pass: read from OE_CLR alias matches GPIO_OE.</p></div><div class="test"><div class="test-name"><code>test_oe_xor_read_returns_oe</code><span class="badge unknown">?</span></div><p>Reading GPIO_OE_XOR returns GPIO_OE value.
+Pass: read from OE_XOR alias matches GPIO_OE.</p></div><div class="test"><div class="test-name"><code>test_single_bit_set</code><span class="badge unknown">?</span></div><p>SET on a single bit does not affect adjacent bits.
+Pass: only bit 16 is set; all others remain 0.</p></div><div class="test"><div class="test-name"><code>test_single_bit_clr</code><span class="badge unknown">?</span></div><p>CLR on a single bit does not affect adjacent bits.
+Pass: only bit 0 is cleared from all-ones.</p></div><div class="test"><div class="test-name"><code>test_single_bit_xor</code><span class="badge unknown">?</span></div><p>XOR on a single bit toggles only that bit.
+Pass: only bit 31 is toggled.</p></div><div class="test"><div class="test-name"><code>test_set_already_set</code><span class="badge unknown">?</span></div><p>SET on bits that are already 1 is a no-op.
+Pass: GPIO_OUT unchanged after setting bits that are already set.</p></div><div class="test"><div class="test-name"><code>test_clr_already_clear</code><span class="badge unknown">?</span></div><p>CLR on bits that are already 0 is a no-op.
+Pass: GPIO_OUT unchanged after clearing bits that are already clear.</p></div><div class="test"><div class="test-name"><code>test_set_zero_is_noop</code><span class="badge unknown">?</span></div><p>SET with value 0 does not change GPIO_OUT.
+Pass: GPIO_OUT unchanged after SET with 0x00000000.</p></div><div class="test"><div class="test-name"><code>test_clr_zero_is_noop</code><span class="badge unknown">?</span></div><p>CLR with value 0 does not change GPIO_OUT.
+Pass: GPIO_OUT unchanged after CLR with 0x00000000.</p></div><div class="test"><div class="test-name"><code>test_xor_zero_is_noop</code><span class="badge unknown">?</span></div><p>XOR with value 0 does not change GPIO_OUT.
+Pass: GPIO_OUT unchanged after XOR with 0x00000000.</p></div><div class="test"><div class="test-name"><code>test_out_direct_overwrite</code><span class="badge unknown">?</span></div><p>Direct write to GPIO_OUT replaces the value regardless of prior atomic ops.
+Pass: GPIO_OUT matches last direct write, not accumulated atomic result.</p></div><div class="test"><div class="test-name"><code>test_oe_set_clr_sequence</code><span class="badge unknown">?</span></div><p>OE SET then CLR on the same bits cancels out.
+Pass: GPIO_OE returns to 0 after SET then CLR of same mask.</p></div><div class="test"><div class="test-name"><code>test_oe_xor_twice_restores</code><span class="badge unknown">?</span></div><p>OE XOR applied twice restores the original value.
+Pass: GPIO_OE unchanged after two identical XOR writes.</p></div><div class="test"><div class="test-name"><code>test_out_all_ones</code><span class="badge unknown">?</span></div><p>GPIO_OUT can hold 0xFFFFFFFF.
+Pass: all 32 bits read back as 1.</p></div><div class="test"><div class="test-name"><code>test_oe_all_ones</code><span class="badge unknown">?</span></div><p>GPIO_OE can hold 0xFFFFFFFF.
+Pass: all 32 bits read back as 1.</p></div><div class="test"><div class="test-name"><code>test_gpio_in_all_ones</code><span class="badge unknown">?</span></div><p>GPIO_IN reads 0xFFFFFFFF when all input pins are high.
+Pass: GPIO_IN returns 0xFFFFFFFF.</p></div><div class="test"><div class="test-name"><code>test_walking_ones_out</code><span class="badge unknown">?</span></div><p>Walking-ones pattern on GPIO_OUT using SET: each bit individually settable.
+Pass: after setting each bit one at a time, GPIO_OUT == 0xFFFFFFFF.</p></div><div class="test"><div class="test-name"><code>test_walking_zeros_out</code><span class="badge unknown">?</span></div><p>Walking-zeros pattern on GPIO_OUT using CLR: each bit individually clearable.
+Pass: after clearing each bit one at a time from 0xFFFFFFFF, GPIO_OUT == 0.</p></div></div></details>
+
+</div>
+</body>
+</html>

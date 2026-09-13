@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""gendoc.py — Generate HTML documentation for SoC modules.
+"""gendoc.py — Generate single-page HTML documentation for the rxpsm32 SoC.
 
 Usage:
     python gendoc.py              Generate all modules
-    python gendoc.py uart         Generate one module
-    python gendoc.py uart spi     Generate specific modules
+    python gendoc.py uart         Generate only specific modules
+    python gendoc.py uart spi     Generate multiple specific modules
 
-Outputs: docs/index.html + docs/doc_<module>.html per module
+Outputs: docs/rxpsm32.html
 """
 
 import re
@@ -16,6 +16,7 @@ import tempfile
 import pathlib
 import xml.etree.ElementTree as ET
 from datetime import date
+from html import escape
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 RTL  = REPO / "rtl/soc"
@@ -85,7 +86,6 @@ def yosys_key_signals(sv_path, module_name, top_n=10):
                         if bit in bit_to_net:
                             fanout[bit_to_net[bit]] += 1
 
-        # Exclude ports and AHB/clock plumbing — not semantically "key"
         exclude = set(m['ports'].keys()) | {
             'active', 'active_r', 'hwrite_r', 'reg_addr_r',
             'hready', 'hresp', 'clk', 'rst_n',
@@ -106,47 +106,42 @@ def parse_sv(sv_path):
     lines = open(sv_path).readlines()
 
     result = {
-        'header':       [],   # top-of-file comment block
-        'regs':         [],   # (name, comment)
-        'addr_params':  [],   # (name, word_addr, byte_offset, comment)
-        'fsm_groups':   {},   # {prefix: [(name, value, comment)]}
-        'other_params': [],   # (name, value, comment)
-        'assigns':      [],   # (name, expr, comment)
-        'always_blocks':[],   # (sensitivity, comment)
+        'header':       [],
+        'regs':         [],
+        'addr_params':  [],
+        'fsm_groups':   {},
+        'other_params': [],
+        'assigns':      [],
+        'always_blocks':[],
     }
 
-    # Header: comment lines before `module`
     for line in lines:
         if re.match(r'\s*module\s', line):
             break
         if line.startswith('//'):
             result['header'].append(line[2:].strip())
 
-    pending = []   # accumulated // comments before a construct
+    pending = []
     i = 0
     while i < len(lines):
         raw  = lines[i]
         line = raw.strip()
 
-        # Section divider resets context
         if re.match(r'//\s*-{10,}', line):
             pending = []
             i += 1
             continue
 
-        # Comment line
         if line.startswith('//'):
             pending.append(line[2:].strip())
             i += 1
             continue
 
-        # Blank line resets pending
         if not line:
             pending = []
             i += 1
             continue
 
-        # --- reg declaration ---
         m = re.match(
             r'reg\s+(?:\[[\d:]+\]\s+)?(\w+)(?:\s*\[.*\])?\s*;\s*(?://\s*(.*))?', line)
         if m:
@@ -154,11 +149,8 @@ def parse_sv(sv_path):
             inline  = (m.group(2) or '').strip()
             comment = ' '.join(pending).strip() or inline
             result['regs'].append((name, comment))
-            pending = []
-            i += 1
-            continue
+            pending = []; i += 1; continue
 
-        # --- localparam ADDR_* ---
         m = re.match(
             r'localparam\s+(?:\[[\d:]+\]\s+)?(ADDR_\w+)\s*=\s*([\w\'h]+);\s*(?://\s*(.*))?', line)
         if m:
@@ -166,18 +158,14 @@ def parse_sv(sv_path):
             word_hex = m.group(2)
             inline   = (m.group(3) or '').strip()
             comment  = ' '.join(pending).strip() or inline
-            # Compute byte offset from word address
             try:
                 word_addr = int(word_hex, 16) if 'h' in word_hex else int(word_hex, 0)
                 byte_off  = f'0x{word_addr * 4:03X}'
             except Exception:
                 byte_off = '?'
             result['addr_params'].append((name, word_hex, byte_off, comment))
-            pending = []
-            i += 1
-            continue
+            pending = []; i += 1; continue
 
-        # --- localparam other (FSM states, constants) ---
         m = re.match(
             r'localparam\s+(?:\[[\d:]+\]\s+)?(\w+)\s*=\s*([\w\'hd_]+);\s*(?://\s*(.*))?', line)
         if m:
@@ -185,50 +173,31 @@ def parse_sv(sv_path):
             value   = m.group(2)
             inline  = (m.group(3) or '').strip()
             comment = ' '.join(pending).strip() or inline
-            # Group FSM states by prefix (TX_, RX_)
             fsm_match = re.match(r'([A-Z]{2,})_', name)
             if fsm_match and fsm_match.group(1) not in ('FIFO', 'ADDR'):
                 prefix = fsm_match.group(1)
                 result['fsm_groups'].setdefault(prefix, []).append((name, value, comment))
             else:
                 result['other_params'].append((name, value, comment))
-            pending = []
-            i += 1
-            continue
+            pending = []; i += 1; continue
 
-        # --- assign statement ---
         m = re.match(r'assign\s+(\w+)\s*=\s*(.+);', line)
         if m:
-            name    = m.group(1)
-            expr    = m.group(2).strip()
-            comment = ' '.join(pending).strip()
-            result['assigns'].append((name, expr, comment))
-            pending = []
-            i += 1
-            continue
+            result['assigns'].append((m.group(1), m.group(2).strip(), ' '.join(pending).strip()))
+            pending = []; i += 1; continue
 
-        # --- wire with inline assignment ---
         m = re.match(
             r'wire\s+(?:\[[\d:]+\]\s+)?(\w+)\s*=\s*(.+?);\s*(?://\s*(.*))?', line)
         if m:
-            name    = m.group(1)
-            expr    = m.group(2).strip()
             inline  = (m.group(3) or '').strip()
             comment = ' '.join(pending).strip() or inline
-            result['assigns'].append((name, expr, comment))
-            pending = []
-            i += 1
-            continue
+            result['assigns'].append((m.group(1), m.group(2).strip(), comment))
+            pending = []; i += 1; continue
 
-        # --- always block ---
         if re.match(r'always\s*[@(]|always\s+@', line):
-            comment = ' '.join(pending).strip()
-            result['always_blocks'].append((line, comment))
-            pending = []
-            i += 1
-            continue
+            result['always_blocks'].append((line, ' '.join(pending).strip()))
+            pending = []; i += 1; continue
 
-        # Anything else resets pending
         pending = []
         i += 1
 
@@ -239,13 +208,12 @@ def parse_sv(sv_path):
 # Test parser
 
 def parse_tests(tb_path, results_xml=None):
-    """Extract test names, docstrings (purpose + pass condition), status."""
+    """Extract test names, docstrings, status."""
     if not tb_path.exists():
         return []
 
     source = open(tb_path).read()
 
-    # Load pass/fail from results.xml
     status = {}
     if results_xml and results_xml.exists():
         try:
@@ -265,7 +233,6 @@ def parse_tests(tb_path, results_xml=None):
     for m in pattern.finditer(source):
         name = m.group(1)
         doc  = re.sub(r'\n\s+', '\n', m.group(2)).strip()
-        # Split into purpose (first paragraph) and pass condition (rest)
         parts     = re.split(r'\n{2,}', doc, maxsplit=1)
         purpose   = parts[0].strip()
         condition = parts[1].strip() if len(parts) > 1 else ''
@@ -275,7 +242,42 @@ def parse_tests(tb_path, results_xml=None):
 
 
 # ---------------------------------------------------------------------------
-# Shared CSS
+# HTML helpers
+
+def get_first_header_line(sv_path):
+    """Extract the first comment line (module description) from SV file."""
+    try:
+        with open(sv_path) as f:
+            for line in f:
+                if line.startswith('//'):
+                    text = line[2:].strip()
+                    m = re.match(r'\w+\.sv\s*[—–-]\s*(.*)', text)
+                    return m.group(1) if m else text
+                if re.match(r'\s*module\s', line):
+                    break
+    except Exception:
+        pass
+    return ''
+
+def badge(st):
+    labels = {'pass': '+ pass', 'fail': 'x fail', 'skip': '~ skip', 'unknown': '?'}
+    return f'<span class="badge {st}">{labels.get(st, st)}</span>'
+
+def det(title, body, open_=False):
+    o = ' open' if open_ else ''
+    return f'<details{o}><summary>{title}</summary><div class="body">{body}</div></details>\n'
+
+def tbl(headers, rows):
+    ths = ''.join(f'<th>{h}</th>' for h in headers)
+    trs = ''.join(
+        '<tr>' + ''.join(f'<td>{c}</td>' for c in row) + '</tr>'
+        for row in rows
+    )
+    return f'<table><tr>{ths}</tr>{trs}</table>'
+
+
+# ---------------------------------------------------------------------------
+# CSS
 
 CSS = """
 :root {
@@ -296,6 +298,7 @@ body {
   width: 240px; min-width: 240px; background: #181818;
   border-right: 1px solid var(--border); padding: 16px 0;
   position: fixed; top: 0; bottom: 0; overflow-y: auto;
+  z-index: 10;
 }
 .sidebar h2 {
   color: var(--fg3); font-size: 0.75em; text-transform: uppercase;
@@ -304,20 +307,31 @@ body {
 }
 .sidebar a {
   display: block; padding: 4px 16px 4px 24px; color: var(--fg2);
-  text-decoration: none; font-size: 0.92em;
+  text-decoration: none; font-size: 0.92em; transition: background 0.1s;
 }
 .sidebar a:hover { background: var(--bg3); color: var(--fg); }
-.sidebar a.active { color: var(--accent); background: var(--bg2); border-left: 2px solid var(--accent); padding-left: 22px; }
+.sidebar a.active {
+  color: var(--accent); background: var(--bg2);
+  border-left: 2px solid var(--accent); padding-left: 22px;
+}
 .sidebar .title {
   padding: 12px 16px; font-size: 1.1em; color: var(--blue);
   font-weight: bold; border-bottom: 1px solid var(--border);
-  margin-bottom: 4px;
+  margin-bottom: 4px; cursor: pointer;
 }
 
 /* --- Main content --- */
 .main {
   margin-left: 240px; padding: 32px 40px; max-width: 900px; width: 100%;
 }
+
+/* Module sections */
+.module-section {
+  padding-top: 20px; margin-bottom: 48px;
+  border-top: 1px solid var(--border);
+}
+.module-section:first-child { border-top: none; }
+
 h1  { color: var(--blue); margin-bottom: 4px; }
 h2  { color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 4px; }
 h4  { color: var(--orange); margin: 12px 0 4px; }
@@ -365,83 +379,47 @@ tr:hover td { background: var(--bg2); }
 }
 .fanout { color: #555; font-size: 0.85em; margin-left: 4px; }
 
-/* --- Index page --- */
-.index-grid {
-  display: grid; grid-template-columns: 1fr; gap: 8px; margin: 8px 0;
-}
-.mod-card {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 14px; background: var(--bg2); border: 1px solid var(--border);
-  border-radius: 5px; text-decoration: none; color: var(--fg);
-}
-.mod-card:hover { border-color: var(--accent); background: var(--bg3); }
-.mod-card .name { color: var(--accent); font-weight: bold; min-width: 160px; }
-.mod-card .desc { color: var(--fg2); font-size: 0.9em; }
-.mod-count { color: var(--fg3); font-size: 0.85em; margin-left: auto; white-space: nowrap; }
+/* scroll offset for fixed sidebar */
+.module-section { scroll-margin-top: 16px; }
+"""
+
+SCRIPT = """
+<script>
+// Highlight active sidebar link on scroll
+(function() {
+  const links = document.querySelectorAll('.sidebar a[href^="#"]');
+  const sections = [];
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) sections.push({el, a});
+  });
+  if (!sections.length) return;
+
+  function update() {
+    let current = sections[0];
+    for (const s of sections) {
+      if (s.el.getBoundingClientRect().top <= 80) current = s;
+    }
+    links.forEach(a => a.classList.remove('active'));
+    current.a.classList.add('active');
+  }
+
+  window.addEventListener('scroll', update, {passive: true});
+  update();
+})();
+</script>
 """
 
 
 # ---------------------------------------------------------------------------
-# HTML helpers
+# Module section builder
 
-def badge(status):
-    labels = {'pass': '+ pass', 'fail': 'x fail', 'skip': '~ skip', 'unknown': '?'}
-    return f'<span class="badge {status}">{labels.get(status, status)}</span>'
-
-def section(title, body, open_=False):
-    o = ' open' if open_ else ''
-    return f'<details{o}><summary>{title}</summary><div class="body">{body}</div></details>\n'
-
-def table(headers, rows):
-    ths = ''.join(f'<th>{h}</th>' for h in headers)
-    trs = ''.join(
-        '<tr>' + ''.join(f'<td>{c}</td>' for c in row) + '</tr>'
-        for row in rows
-    )
-    return f'<table><tr>{ths}</tr>{trs}</table>'
-
-def sidebar_html(active_module=None):
-    """Generate the sidebar navigation."""
-    links = ''
-    for group_name, modules in GROUPS:
-        links += f'<h2>{group_name}</h2>\n'
-        for name, _ in modules:
-            cls = ' class="active"' if name == active_module else ''
-            links += f'<a href="doc_{name}.html"{cls}>{name}</a>\n'
-
-    return f'''<nav class="sidebar">
-<div class="title"><a href="index.html" style="color:inherit;text-decoration:none">rxpsm32</a></div>
-{links}
-</nav>'''
-
-
-# ---------------------------------------------------------------------------
-# Module page generator
-
-def get_first_header_line(sv_path):
-    """Extract the first comment line (module description) from SV file."""
-    try:
-        with open(sv_path) as f:
-            for line in f:
-                if line.startswith('//'):
-                    text = line[2:].strip()
-                    # Strip "module_name.sv — " prefix
-                    m = re.match(r'\w+\.sv\s*[—–-]\s*(.*)', text)
-                    return m.group(1) if m else text
-                if re.match(r'\s*module\s', line):
-                    break
-    except Exception:
-        pass
-    return ''
-
-
-def generate_module(module, sv_rel_path, run_yosys=True):
-    """Generate HTML doc for a single module. Returns (out_path, test_count)."""
+def build_module_section(module, sv_rel_path, run_yosys=True):
+    """Build HTML fragment for one module. Returns (html_str, test_count) or (None, 0)."""
     sv_path  = RTL / sv_rel_path
-    # Test file: try test_<module>.py
     tb_path  = TB / f'test_{module}.py'
     res_path = TB / 'results.xml'
-    out_path = DOCS / f'doc_{module}.html'
 
     if not sv_path.exists():
         print(f'  Skipping {module}: {sv_path} not found')
@@ -449,86 +427,82 @@ def generate_module(module, sv_rel_path, run_yosys=True):
 
     print(f'  Parsing {sv_path.name}...')
     sv = parse_sv(sv_path)
-
     tests = parse_tests(tb_path, res_path)
 
     key_signals = []
     if run_yosys:
         key_signals = yosys_key_signals(sv_path, module)
 
-    # --- Header description ---
     desc = get_first_header_line(sv_path)
 
-    # --- Key signals section ---
+    # Key signals
     if key_signals:
         pills = ''.join(
             f'<span class="key-pill"><code>{name}</code>'
             f'<span class="fanout">({fanout})</span></span>'
             for name, fanout in key_signals
         )
-        key_html = f'<p style="color:#666;margin-bottom:10px">Ranked by fanout — how many logic cells read this signal.</p>{pills}'
+        key_html = f'<p style="color:#666;margin-bottom:10px">Ranked by fanout.</p>{pills}'
     else:
-        key_html = '<p style="color:#666"><em>Yosys not available or skipped — fanout analysis not shown.</em></p>'
+        key_html = '<p style="color:#666"><em>Yosys not available — fanout analysis skipped.</em></p>'
 
-    # --- Registers section ---
-    reg_html = table(
+    # Registers
+    reg_html = tbl(
         ['Name', 'Description'],
         [(f'<code>{name}</code>', comment or '<em>-</em>') for name, comment in sv['regs']]
     ) if sv['regs'] else '<p style="color:#666"><em>No register declarations found.</em></p>'
 
-    # --- Address decoder section ---
-    addr_html = table(
+    # Address decoder
+    addr_html = tbl(
         ['Register', 'Byte offset', 'Word addr', 'Description'],
         [(f'<code>{name}</code>', f'<code>{byte_off}</code>',
           f'<code>{word}</code>', comment or '<em>-</em>')
          for name, word, byte_off, comment in sv['addr_params']]
     ) if sv['addr_params'] else '<p style="color:#666"><em>No address parameters found.</em></p>'
 
-    # --- FSM states section ---
+    # FSM states
     fsm_html = ''
     for prefix, states in sv['fsm_groups'].items():
         fsm_html += f'<h4>{prefix} states</h4>'
-        fsm_html += table(
+        fsm_html += tbl(
             ['Name', 'Value', 'Description'],
             [(f'<code>{n}</code>', f'<code>{v}</code>', c or '<em>-</em>')
              for n, v, c in states]
         )
-
     if sv['other_params']:
         fsm_html += '<h4>Constants</h4>'
-        fsm_html += table(
+        fsm_html += tbl(
             ['Name', 'Value', 'Description'],
             [(f'<code>{n}</code>', f'<code>{v}</code>', c or '<em>-</em>')
              for n, v, c in sv['other_params']]
         )
-
     if not fsm_html:
         fsm_html = '<p style="color:#666"><em>No FSM states or constants found.</em></p>'
 
-    # --- Combinational logic section ---
-    assign_html = table(
+    # Combinational logic
+    assign_html = tbl(
         ['Signal', 'Expression', 'Description'],
         [(f'<code>{name}</code>',
-          f'<code title="{expr}">{expr[:70]}{"..." if len(expr) > 70 else ""}</code>',
+          f'<code title="{escape(expr)}">{escape(expr[:70])}{"..." if len(expr) > 70 else ""}</code>',
           comment or '<em>-</em>')
          for name, expr, comment in sv['assigns']]
     ) if sv['assigns'] else '<p style="color:#666"><em>No assign statements found.</em></p>'
 
-    # --- Always blocks section ---
+    # Always blocks
     always_html = ''.join(
-        f'<div class="always"><code>{sens}</code>'
-        f'{"<p>" + c + "</p>" if c else ""}</div>'
+        f'<div class="always"><code>{escape(sens)}</code>'
+        f'{"<p>" + escape(c) + "</p>" if c else ""}</div>'
         for sens, c in sv['always_blocks']
     ) if sv['always_blocks'] else '<p style="color:#666"><em>No always blocks found.</em></p>'
 
-    # --- Tests section ---
+    # Tests
     total   = len(tests)
-    passed  = sum(1 for *_, st in tests if st == 'pass')
-    failed  = sum(1 for *_, st in tests if st == 'fail')
-    skipped = sum(1 for *_, st in tests if st == 'skip')
-    unknown = sum(1 for *_, st in tests if st == 'unknown')
-
     if total > 0:
+        passed  = sum(1 for *_, st in tests if st == 'pass')
+        failed  = sum(1 for *_, st in tests if st == 'fail')
+        skipped = sum(1 for *_, st in tests if st == 'skip')
+        unknown = sum(1 for *_, st in tests if st == 'unknown')
+
         summary = (f'<p style="color:#888">{total} tests &mdash; '
                    f'{passed} pass &nbsp; {failed} fail &nbsp; '
                    f'{skipped} skip &nbsp; {unknown} not run</p>')
@@ -540,105 +514,37 @@ def generate_module(module, sv_rel_path, run_yosys=True):
             test_items += (
                 f'<div class="test">'
                 f'<div class="test-name"><code>{name}</code>{badge(st)}</div>'
-                f'<p>{purpose}</p>{cond}'
+                f'<p>{escape(purpose)}</p>{cond}'
                 f'</div>'
             )
-
         test_html = summary + test_items
     else:
         test_html = '<p style="color:#666"><em>No testbench found.</em></p>'
 
-    # --- Header block (from SV comments) ---
+    # Header block
     header_html = ''
     if sv['header']:
         header_html = '<pre style="color:#888;font-size:0.9em;line-height:1.5;margin:8px 0;white-space:pre-wrap">'
-        header_html += '\n'.join(sv['header'])
+        header_html += escape('\n'.join(sv['header']))
         header_html += '</pre>'
 
-    # --- Assemble full HTML ---
     test_label = f'Tests ({total})' if total > 0 else 'Tests'
-    html = f'''<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>{module} — rxpsm32 docs</title>
-<style>{CSS}</style>
-</head>
-<body>
-{sidebar_html(module)}
-<div class="main">
+
+    html = f'''<div class="module-section" id="{module}">
 <h1>{module}.sv</h1>
-<p style="color:#555">{desc} &nbsp;&middot;&nbsp; Generated {date.today()}</p>
+<p style="color:#555">{escape(desc)}</p>
 
-{section("Module header", header_html, open_=True) if header_html else ""}
-{section("Key signals", key_html)}
-{section("Registers", reg_html, open_=True)}
-{section("Address decoder", addr_html)}
-{section("FSM states &amp; constants", fsm_html)}
-{section("Combinational logic", assign_html)}
-{section("Always blocks", always_html)}
-{section(test_label, test_html)}
+{det("Module header", header_html, open_=True) if header_html else ""}
+{det("Key signals", key_html)}
+{det("Registers", reg_html, open_=True)}
+{det("Address decoder", addr_html)}
+{det("FSM states &amp; constants", fsm_html)}
+{det("Combinational logic", assign_html)}
+{det("Always blocks", always_html)}
+{det(test_label, test_html)}
 </div>
-</body>
-</html>'''
-
-    out_path.write_text(html)
-    return out_path, total
-
-
-# ---------------------------------------------------------------------------
-# Index page generator
-
-def generate_index(module_info):
-    """Generate index.html with cards for all modules, grouped."""
-    out_path = DOCS / 'index.html'
-
-    body = ''
-    for group_name, modules in GROUPS:
-        body += f'<h2>{group_name}</h2>\n<div class="index-grid">\n'
-        for name, sv_rel in modules:
-            sv_path = RTL / sv_rel
-            desc = get_first_header_line(sv_path) if sv_path.exists() else ''
-            test_count = module_info.get(name, 0)
-            count_label = f'{test_count} tests' if test_count > 0 else 'no tests'
-            exists = sv_path.exists()
-            if exists:
-                body += (
-                    f'<a class="mod-card" href="doc_{name}.html">'
-                    f'<span class="name">{name}</span>'
-                    f'<span class="desc">{desc}</span>'
-                    f'<span class="mod-count">{count_label}</span>'
-                    f'</a>\n'
-                )
-            else:
-                body += (
-                    f'<div class="mod-card" style="opacity:0.4">'
-                    f'<span class="name">{name}</span>'
-                    f'<span class="desc">not yet implemented</span>'
-                    f'</div>\n'
-                )
-        body += '</div>\n'
-
-    html = f'''<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>rxpsm32 — SoC documentation</title>
-<style>{CSS}</style>
-</head>
-<body>
-{sidebar_html()}
-<div class="main">
-<h1>rxpsm32 SoC</h1>
-<p style="color:#555">RISC-V SoC documentation &nbsp;&middot;&nbsp; Generated {date.today()}</p>
-{body}
-</div>
-</body>
-</html>'''
-
-    out_path.write_text(html)
-    print(f'Index -> {out_path}')
-    return out_path
+'''
+    return html, total
 
 
 # ---------------------------------------------------------------------------
@@ -649,12 +555,7 @@ def main():
 
     DOCS.mkdir(exist_ok=True)
 
-    if len(sys.argv) > 1:
-        targets = sys.argv[1:]
-    else:
-        targets = list(ALL_MODULES.keys())
-
-    # Check if yosys is available
+    # Check yosys
     try:
         subprocess.run(['yosys', '--version'], capture_output=True, timeout=5)
         has_yosys = True
@@ -662,20 +563,50 @@ def main():
         has_yosys = False
         print('Yosys not found — skipping fanout analysis')
 
-    module_info = {}  # name -> test_count
-    for name in targets:
-        if name not in ALL_MODULES:
-            print(f'Unknown module: {name}')
-            print(f'Available: {", ".join(ALL_MODULES.keys())}')
-            continue
-        print(f'[{name}]')
-        out, tc = generate_module(name, ALL_MODULES[name], run_yosys=has_yosys)
-        if out:
-            module_info[name] = tc
-            print(f'  -> {out}')
+    # Build sidebar
+    sidebar_links = ''
+    for group_name, modules in GROUPS:
+        sidebar_links += f'<h2>{group_name}</h2>\n'
+        for name, sv_rel in modules:
+            sv_path = RTL / sv_rel
+            if sv_path.exists():
+                sidebar_links += f'<a href="#{name}">{name}</a>\n'
+            else:
+                sidebar_links += f'<a href="#{name}" style="opacity:0.35">{name}</a>\n'
 
-    # Always regenerate index
-    generate_index(module_info)
+    sidebar = f'''<nav class="sidebar">
+<div class="title">rxpsm32</div>
+{sidebar_links}
+</nav>'''
+
+    # Build all module sections
+    sections = ''
+    for group_name, modules in GROUPS:
+        for name, sv_rel in modules:
+            print(f'[{name}]')
+            html, tc = build_module_section(name, sv_rel, run_yosys=has_yosys)
+            if html:
+                sections += html
+
+    out_path = DOCS / 'rxpsm32.html'
+    full_html = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>rxpsm32 — SoC documentation</title>
+<style>{CSS}</style>
+</head>
+<body>
+{sidebar}
+<div class="main">
+{sections}
+</div>
+{SCRIPT}
+</body>
+</html>'''
+
+    out_path.write_text(full_html)
+    print(f'\nDone -> {out_path}')
 
 
 if __name__ == '__main__':

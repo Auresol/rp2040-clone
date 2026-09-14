@@ -4,7 +4,7 @@
 // Debug: JTAG DTM → DM → CPU debug port (RISC-V 0.13.2 debug spec)
 //
 // Instruction port: CPU0-I → i_dec → SRAM I port or XIP flash (via cache).
-// Data port:        CPU0-D → d_dec → SRAM D port + peripherals.
+// Data port:        CPU0-D → crossbar (1×10) → SRAM D port + peripherals.
 //
 // Address map (instruction port):
 //   0x0000_0000 – 0x0000_FFFF  →  SRAM I port (64 KB)
@@ -418,111 +418,132 @@ hazard3_cpu_2port cpu0 (
 );
 
 // ----------------------------------------------------------------------------
-// Data-port decoder: routes CPU0-D directly to SRAM, GPIO, PIO0, PIO1, or UART0
+// Data-port crossbar: routes CPU0-D (currently 1 master) to 10 slaves.
+// Uses libfpga ahbl_crossbar (strict priority). Ready for multi-master
+// when DMA / second core are added — just bump N_MASTERS.
 
-ahb_d_decoder d_dec (
-    .clk       (clk),
-    .rst_n     (rst_n),
+localparam XBAR_D_NM = 1;   // masters: CPU0-D (future: +CPU1-D, DMA_R, DMA_W)
+localparam XBAR_D_NS = 10;  // slaves
 
-    .m_haddr   (cpu0_d_haddr),
-    .m_hwrite  (cpu0_d_hwrite),
-    .m_htrans  (cpu0_d_htrans),
-    .m_hsize   (cpu0_d_hsize),
-    .m_hwdata  (cpu0_d_hwdata),
-    .m_hrdata  (cpu0_d_hrdata),
-    .m_hready  (cpu0_d_hready),
-    .m_hresp   (cpu0_d_hresp),
+// Slave indices (must match ADDR_MAP packing order)
+localparam S_SRAM = 0, S_GPIO = 1, S_PIO0 = 2, S_PIO1 = 3, S_UART0 = 4,
+           S_SPI0 = 5, S_TIMER = 6, S_WDOG = 7, S_RSTC = 8, S_SYSINFO = 9;
 
-    .s0_haddr  (dec_sram_haddr),
-    .s0_hwrite (dec_sram_hwrite),
-    .s0_htrans (dec_sram_htrans),
-    .s0_hsize  (dec_sram_hsize),
-    .s0_hwdata (dec_sram_hwdata),
-    .s0_hrdata (dec_sram_hrdata),
-    .s0_hready (dec_sram_hready),
-    .s0_hresp  (dec_sram_hresp),
+// Address map: (addr ^ MAP[i]) & MASK[i] == 0 → slave i
+// Packed MSB-first: {slave9, slave8, ..., slave0}
+localparam [XBAR_D_NS*32-1:0] XBAR_D_ADDR_MAP = {
+    32'h4005_C000,  // 9: SYSINFO
+    32'h4005_4000,  // 8: RESET
+    32'h4005_8000,  // 7: WATCHDOG
+    32'h4005_0000,  // 6: TIMER
+    32'h4003_C000,  // 5: SPI0
+    32'h4003_0000,  // 4: UART0
+    32'h5030_0000,  // 3: PIO1
+    32'h5020_0000,  // 2: PIO0
+    32'h4000_0000,  // 1: GPIO
+    32'h0000_0000   // 0: SRAM
+};
+localparam [XBAR_D_NS*32-1:0] XBAR_D_ADDR_MASK = {
+    32'hFFFF_C000,  // 9: SYSINFO  (16 KB)
+    32'hFFFF_C000,  // 8: RESET    (16 KB)
+    32'hFFFF_C000,  // 7: WATCHDOG (16 KB)
+    32'hFFFF_C000,  // 6: TIMER    (16 KB)
+    32'hFFFF_C000,  // 5: SPI0     (16 KB)
+    32'hFFFF_C000,  // 4: UART0    (16 KB)
+    32'hFFF0_0000,  // 3: PIO1     (1 MB)
+    32'hFFF0_0000,  // 2: PIO0     (1 MB)
+    32'hFFFF_0000,  // 1: GPIO     (64 KB)
+    32'hFFFF_0000   // 0: SRAM     (64 KB)
+};
 
-    .s1_haddr  (dec_gpio_haddr),
-    .s1_hwrite (dec_gpio_hwrite),
-    .s1_htrans (dec_gpio_htrans),
-    .s1_hsize  (dec_gpio_hsize),
-    .s1_hwdata (dec_gpio_hwdata),
-    .s1_hrdata (dec_gpio_hrdata),
-    .s1_hready (dec_gpio_hready),
-    .s1_hresp  (dec_gpio_hresp),
+// Crossbar slave-side packed buses
+wire [XBAR_D_NS-1:0]      xbar_d_dst_hready;
+wire [XBAR_D_NS-1:0]      xbar_d_dst_hready_resp;
+wire [XBAR_D_NS-1:0]      xbar_d_dst_hresp;
+wire [XBAR_D_NS*32-1:0]   xbar_d_dst_haddr;
+wire [XBAR_D_NS-1:0]      xbar_d_dst_hwrite;
+wire [XBAR_D_NS*2-1:0]    xbar_d_dst_htrans;
+wire [XBAR_D_NS*3-1:0]    xbar_d_dst_hsize;
+wire [XBAR_D_NS*3-1:0]    xbar_d_dst_hburst;
+wire [XBAR_D_NS*4-1:0]    xbar_d_dst_hprot;
+wire [XBAR_D_NS-1:0]      xbar_d_dst_hmastlock;
+wire [XBAR_D_NS*32-1:0]   xbar_d_dst_hwdata;
+wire [XBAR_D_NS*32-1:0]   xbar_d_dst_hrdata;
 
-    .s2_haddr  (dec_pio0_haddr),
-    .s2_hwrite (dec_pio0_hwrite),
-    .s2_htrans (dec_pio0_htrans),
-    .s2_hsize  (dec_pio0_hsize),
-    .s2_hwdata (dec_pio0_hwdata),
-    .s2_hrdata (dec_pio0_hrdata),
-    .s2_hready (dec_pio0_hready),
-    .s2_hresp  (dec_pio0_hresp),
+ahbl_crossbar_strict #(
+    .N_MASTERS    (XBAR_D_NM),
+    .N_SLAVES     (XBAR_D_NS),
+    .ADDR_MAP     (XBAR_D_ADDR_MAP),
+    .ADDR_MASK    (XBAR_D_ADDR_MASK)
+) d_xbar (
+    .clk              (clk),
+    .rst_n            (rst_n),
 
-    .s3_haddr  (dec_pio1_haddr),
-    .s3_hwrite (dec_pio1_hwrite),
-    .s3_htrans (dec_pio1_htrans),
-    .s3_hsize  (dec_pio1_hsize),
-    .s3_hwdata (dec_pio1_hwdata),
-    .s3_hrdata (dec_pio1_hrdata),
-    .s3_hready (dec_pio1_hready),
-    .s3_hresp  (dec_pio1_hresp),
+    // Master 0: CPU0 data port
+    .src_hready_resp  (cpu0_d_hready),
+    .src_hresp        (cpu0_d_hresp),
+    .src_haddr        (cpu0_d_haddr),
+    .src_hwrite       (cpu0_d_hwrite),
+    .src_htrans       (cpu0_d_htrans),
+    .src_hsize        (cpu0_d_hsize),
+    .src_hburst       (cpu0_d_hburst),
+    .src_hprot        (cpu0_d_hprot),
+    .src_hmastlock    (cpu0_d_hmastlock),
+    .src_hwdata       (cpu0_d_hwdata),
+    .src_hrdata       (cpu0_d_hrdata),
 
-    .s4_haddr  (dec_uart0_haddr),
-    .s4_hwrite (dec_uart0_hwrite),
-    .s4_htrans (dec_uart0_htrans),
-    .s4_hsize  (dec_uart0_hsize),
-    .s4_hwdata (dec_uart0_hwdata),
-    .s4_hrdata (dec_uart0_hrdata),
-    .s4_hready (dec_uart0_hready),
-    .s4_hresp  (dec_uart0_hresp),
-
-    .s5_haddr  (dec_spi0_haddr),
-    .s5_hwrite (dec_spi0_hwrite),
-    .s5_htrans (dec_spi0_htrans),
-    .s5_hsize  (dec_spi0_hsize),
-    .s5_hwdata (dec_spi0_hwdata),
-    .s5_hrdata (dec_spi0_hrdata),
-    .s5_hready (dec_spi0_hready),
-    .s5_hresp  (dec_spi0_hresp),
-
-    .s6_haddr  (dec_timer_haddr),
-    .s6_hwrite (dec_timer_hwrite),
-    .s6_htrans (dec_timer_htrans),
-    .s6_hsize  (dec_timer_hsize),
-    .s6_hwdata (dec_timer_hwdata),
-    .s6_hrdata (dec_timer_hrdata),
-    .s6_hready (dec_timer_hready),
-    .s6_hresp  (dec_timer_hresp),
-
-    .s7_haddr  (dec_wdog_haddr),
-    .s7_hwrite (dec_wdog_hwrite),
-    .s7_htrans (dec_wdog_htrans),
-    .s7_hsize  (dec_wdog_hsize),
-    .s7_hwdata (dec_wdog_hwdata),
-    .s7_hrdata (dec_wdog_hrdata),
-    .s7_hready (dec_wdog_hready),
-    .s7_hresp  (dec_wdog_hresp),
-
-    .s8_haddr  (dec_rstc_haddr),
-    .s8_hwrite (dec_rstc_hwrite),
-    .s8_htrans (dec_rstc_htrans),
-    .s8_hsize  (dec_rstc_hsize),
-    .s8_hwdata (dec_rstc_hwdata),
-    .s8_hrdata (dec_rstc_hrdata),
-    .s8_hready (dec_rstc_hready),
-    .s8_hresp  (dec_rstc_hresp),
-
-    .s9_haddr  (dec_sysinfo_haddr),
-    .s9_hwrite (dec_sysinfo_hwrite),
-    .s9_htrans (dec_sysinfo_htrans),
-    .s9_hsize  (dec_sysinfo_hsize),
-    .s9_hwdata (dec_sysinfo_hwdata),
-    .s9_hrdata (dec_sysinfo_hrdata),
-    .s9_hready (dec_sysinfo_hready),
-    .s9_hresp  (dec_sysinfo_hresp)
+    // Slave bus (packed)
+    .dst_hready       (xbar_d_dst_hready),
+    .dst_hready_resp  (xbar_d_dst_hready_resp),
+    .dst_hresp        (xbar_d_dst_hresp),
+    .dst_haddr        (xbar_d_dst_haddr),
+    .dst_hwrite       (xbar_d_dst_hwrite),
+    .dst_htrans       (xbar_d_dst_htrans),
+    .dst_hsize        (xbar_d_dst_hsize),
+    .dst_hburst       (xbar_d_dst_hburst),
+    .dst_hprot        (xbar_d_dst_hprot),
+    .dst_hmastlock    (xbar_d_dst_hmastlock),
+    .dst_hwdata       (xbar_d_dst_hwdata),
+    .dst_hrdata       (xbar_d_dst_hrdata)
 );
+
+// Unpack crossbar → per-slave wires (address/control/write-data)
+`define XBAR_UNPACK_SLAVE(IDX, PFX) \
+    assign PFX``_haddr  = xbar_d_dst_haddr [IDX*32 +: 32]; \
+    assign PFX``_hwrite = xbar_d_dst_hwrite[IDX];           \
+    assign PFX``_htrans = xbar_d_dst_htrans[IDX*2  +: 2];  \
+    assign PFX``_hsize  = xbar_d_dst_hsize [IDX*3  +: 3];  \
+    assign PFX``_hwdata = xbar_d_dst_hwdata[IDX*32 +: 32];
+
+`XBAR_UNPACK_SLAVE(S_SRAM,    dec_sram)
+`XBAR_UNPACK_SLAVE(S_GPIO,    dec_gpio)
+`XBAR_UNPACK_SLAVE(S_PIO0,    dec_pio0)
+`XBAR_UNPACK_SLAVE(S_PIO1,    dec_pio1)
+`XBAR_UNPACK_SLAVE(S_UART0,   dec_uart0)
+`XBAR_UNPACK_SLAVE(S_SPI0,    dec_spi0)
+`XBAR_UNPACK_SLAVE(S_TIMER,   dec_timer)
+`XBAR_UNPACK_SLAVE(S_WDOG,    dec_wdog)
+`XBAR_UNPACK_SLAVE(S_RSTC,    dec_rstc)
+`XBAR_UNPACK_SLAVE(S_SYSINFO, dec_sysinfo)
+
+`undef XBAR_UNPACK_SLAVE
+
+// Pack per-slave responses → crossbar
+assign xbar_d_dst_hrdata = {
+    dec_sysinfo_hrdata, dec_rstc_hrdata,  dec_wdog_hrdata,  dec_timer_hrdata,
+    dec_spi0_hrdata,    dec_uart0_hrdata, dec_pio1_hrdata,  dec_pio0_hrdata,
+    dec_gpio_hrdata,    dec_sram_hrdata
+};
+assign xbar_d_dst_hready_resp = {
+    dec_sysinfo_hready, dec_rstc_hready,  dec_wdog_hready,  dec_timer_hready,
+    dec_spi0_hready,    dec_uart0_hready, dec_pio1_hready,  dec_pio0_hready,
+    dec_gpio_hready,    dec_sram_hready
+};
+assign xbar_d_dst_hresp = {
+    dec_sysinfo_hresp, dec_rstc_hresp,  dec_wdog_hresp,  dec_timer_hresp,
+    dec_spi0_hresp,    dec_uart0_hresp, dec_pio1_hresp,  dec_pio0_hresp,
+    dec_gpio_hresp,    dec_sram_hresp
+};
 
 // ----------------------------------------------------------------------------
 // Instruction-port decoder: routes CPU0-I to SRAM I port or XIP flash.

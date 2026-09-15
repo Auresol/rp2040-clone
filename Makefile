@@ -255,7 +255,7 @@ remote-bitstream-kr260:
 OPENLANE_DIR       = openlane
 OPENLANE_SRC       = $(OPENLANE_DIR)/src
 OPENLANE_REMOTE    = /tools/OpenLane/designs/rvsoc
-OPENLANE_TAG      ?= run_01
+OPENLANE_TAG      ?= $(shell n=1; while ssh $(REMOTE_HOST) test -d $(OPENLANE_REMOTE)/runs/run_$$(printf '%02d' $$n) 2>/dev/null; do n=$$((n+1)); done; printf 'run_%02d' $$n)
 OPENLANE_REPORTS   = $(OPENLANE_DIR)/reports
 
 # Hazard3 source directories
@@ -308,7 +308,7 @@ openlane-prepare:
 
 remote-openlane: openlane-prepare
 	@rsync -a --delete --exclude='runs' $(OPENLANE_DIR)/ $(REMOTE_HOST):$(OPENLANE_REMOTE)/
-	@ssh $(REMOTE_HOST) 'docker run --rm -v /tools/OpenLane:/openlane -v /tools/OpenLane/designs:/openlane/install -v /home/auresol:/home/auresol -v /home/auresol/.ciel:/home/auresol/.ciel -e PDK_ROOT=/home/auresol/.ciel -e PDK=sky130A --user 1000:100 ghcr.io/the-openroad-project/openlane:ff5509f65b17bfa4068d5336495ab1718987ff69-amd64 bash -c "./flow.tcl -design designs/rvsoc -tag $(OPENLANE_TAG) -overwrite"'; \
+	@ssh $(REMOTE_HOST) 'docker run --rm -v /tools/OpenLane:/openlane -v /tools/OpenLane/designs:/openlane/install -v /home/auresol:/home/auresol -v /home/auresol/.ciel:/home/auresol/.ciel -e PDK_ROOT=/home/auresol/.ciel -e PDK=sky130A --user 1000:100 ghcr.io/the-openroad-project/openlane:ff5509f65b17bfa4068d5336495ab1718987ff69-amd64 bash -c "./flow.tcl -design designs/rvsoc -tag $(OPENLANE_TAG)"'; \
 	rc=$$?; \
 	mkdir -p $(OPENLANE_DIR)/runs/$(OPENLANE_TAG); \
 	rsync -a \
@@ -317,9 +317,7 @@ remote-openlane: openlane-prepare
 		--include='*.summary.rpt' \
 		--include='*.def' \
 		--include='*.gds' \
-		--include='*.sdf' \
 		--include='*.nl.v' \
-		--include='*.spef' \
 		--include='*.log' \
 		--include='*.csv' \
 		--exclude='*' \

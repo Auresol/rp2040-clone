@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>rxpsm32 — Gate-level schematics</title>
+<style>
+:root {
+  --bg: #1e1e1e; --bg2: #252526; --bg3: #2a2a2a;
+  --fg: #d4d4d4; --fg2: #aaa; --fg3: #666;
+  --accent: #4ec9b0; --blue: #9cdcfe; --orange: #ce9178;
+  --border: #333;
+}
+* { box-sizing: border-box; }
+body {
+  font-family: 'Consolas', 'Menlo', monospace;
+  background: var(--bg); color: var(--fg); font-size: 14px;
+  margin: 0; padding: 0; display: flex; min-height: 100vh;
+}
+
+/* --- Sidebar --- */
+.sidebar {
+  width: 240px; min-width: 240px; background: #181818;
+  border-right: 1px solid var(--border); padding: 16px 0;
+  position: fixed; top: 0; bottom: 0; overflow-y: auto;
+  z-index: 10;
+}
+.sidebar h2 {
+  color: var(--fg3); font-size: 0.75em; text-transform: uppercase;
+  letter-spacing: 1.5px; padding: 12px 16px 4px; margin: 0;
+  border: none;
+}
+.sidebar a {
+  display: block; padding: 4px 16px 4px 24px; color: var(--fg2);
+  text-decoration: none; font-size: 0.92em; transition: background 0.1s;
+}
+.sidebar a:hover { background: var(--bg3); color: var(--fg); }
+.sidebar a.active {
+  color: var(--accent); background: var(--bg2);
+  border-left: 2px solid var(--accent); padding-left: 22px;
+}
+.sidebar .title {
+  padding: 12px 16px; font-size: 1.1em; color: var(--blue);
+  font-weight: bold; border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+.sidebar .doc-links {
+  border-top: 1px solid var(--border);
+  margin-top: 8px; padding-top: 8px;
+}
+.sidebar .doc-links a {
+  color: var(--fg3); font-size: 0.85em;
+}
+
+/* --- Main content — full width --- */
+.main {
+  margin-left: 240px; padding: 16px 24px; width: calc(100% - 240px);
+}
+
+.module-section {
+  padding-top: 12px; margin-bottom: 24px;
+  border-top: 1px solid var(--border);
+  scroll-margin-top: 16px;
+}
+.module-section:first-child { border-top: none; }
+
+h1  { color: var(--blue); margin-bottom: 4px; }
+h2  { color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+p   { margin: 6px 0; }
+code { color: var(--orange); }
+a   { color: var(--accent); }
+
+details { margin: 10px 0; border: 1px solid var(--border); border-radius: 5px; }
+summary {
+  padding: 9px 14px; cursor: pointer; font-size: 1.05em;
+  color: var(--accent); background: var(--bg2); border-radius: 5px;
+  user-select: none; list-style: none;
+}
+summary:hover { background: var(--bg3); }
+.body { padding: 0; }
+
+table { border-collapse: collapse; width: auto; margin: 8px 12px; }
+th    { background: var(--bg2); color: var(--blue); text-align: left; padding: 6px 10px; }
+td    { padding: 5px 10px; border-bottom: 1px solid var(--bg3); vertical-align: top; }
+tr:hover td { background: var(--bg2); }
+
+/* Schematic viewport — pan & zoom via JS */
+.schematic-viewport {
+  position: relative;
+  background: #fff; border-radius: 4px;
+  overflow: hidden; cursor: grab;
+  height: calc(100vh - 160px);
+  width: 100%;
+}
+.schematic-viewport:active { cursor: grabbing; }
+.schematic-viewport .svg-container {
+  transform-origin: 0 0;
+  position: absolute; top: 0; left: 0;
+}
+.schematic-viewport .svg-container img {
+  display: block;
+}
+
+/* Zoom controls */
+.zoom-controls {
+  position: absolute; top: 8px; right: 8px; z-index: 5;
+  display: flex; gap: 4px;
+}
+.zoom-controls button {
+  background: var(--bg2); color: var(--fg); border: 1px solid var(--border);
+  border-radius: 4px; padding: 4px 10px; cursor: pointer;
+  font-family: inherit; font-size: 0.9em;
+}
+.zoom-controls button:hover { background: var(--bg3); }
+
+.stats { padding: 8px 12px; }
+
+.gen-info {
+  color: var(--fg3); font-size: 0.85em; margin-top: 32px;
+  border-top: 1px solid var(--border); padding-top: 8px;
+}
+</style>
+</head>
+<body>
+<nav class="sidebar">
+<div class="title">Gate-level docs</div>
+<h2>Modules</h2>
+<a href="#uart">uart</a>
+
+<div class="doc-links">
+<h2>Other docs</h2>
+<a href="rxpsm32.html">SoC docs</a>
+</div>
+</nav>
+<div class="main">
+<h2 style="margin-top:0">RTL schematics</h2>
+<p style="color:#666">Synthesized with Yosys, rendered with netlistsvg.
+High-level view showing muxes, adders, flip-flops, and memories.</p>
+<div class="module-section" id="uart">
+<h1>uart.sv</h1>
+<p style="color:#555">AHB-Lite UART peripheral (8N1, TX+RX, configurable baud).</p>
+<details open>
+<summary>RTL-level schematic</summary>
+<div class="body">
+<div class="schematic-viewport" data-svg="svg/uart.svg">
+  <div class="zoom-controls">
+    <button onclick="zoomFit(this)">Fit</button>
+    <button onclick="zoomIn(this)">+</button>
+    <button onclick="zoomOut(this)">&minus;</button>
+    <button onclick="zoom100(this)">1:1</button>
+  </div>
+  <div class="svg-container">
+    <img src="svg/uart.svg" draggable="false">
+  </div>
+</div>
+<div class="stats">
+<p style="color:#888">Total cells: <strong>333</strong></p><table><tr><th>Cell type</th><th>Count</th></tr><tr><td><code>$mux</code></td><td>69</td></tr><tr><td><code>$eq</code></td><td>58</td></tr><tr><td><code>$reduce_and</code></td><td>38</td></tr><tr><td><code>$adffe</code></td><td>26</td></tr><tr><td><code>$logic_and</code></td><td>26</td></tr><tr><td><code>$ne</code></td><td>21</td></tr><tr><td><code>$logic_not</code></td><td>20</td></tr><tr><td><code>$dffe</code></td><td>16</td></tr><tr><td><code>$reduce_bool</code></td><td>13</td></tr><tr><td><code>$pmux</code></td><td>13</td></tr><tr><td><code>$add</code></td><td>12</td></tr><tr><td><code>$sub</code></td><td>6</td></tr><tr><td><code>$dff</code></td><td>3</td></tr><tr><td><code>$reduce_or</code></td><td>2</td></tr><tr><td><code>$ge</code></td><td>2</td></tr><tr><td><code>$logic_or</code></td><td>2</td></tr><tr><td><code>$adff</code></td><td>2</td></tr><tr><td><code>$and</code></td><td>1</td></tr><tr><td><code>$not</code></td><td>1</td></tr><tr><td><code>$le</code></td><td>1</td></tr></table>
+</div>
+</div>
+</details>
+</div>
+
+<p class="gen-info">Generated 2026-09-15 by gendoc_gate.py</p>
+</div>
+
+<script>
+// --- Sidebar active link ---
+(function() {
+  const links = document.querySelectorAll('.sidebar a[href^="#"]');
+  const sections = [];
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) sections.push({el, a});
+  });
+  if (!sections.length) return;
+  function update() {
+    let current = sections[0];
+    for (const s of sections) {
+      if (s.el.getBoundingClientRect().top <= 80) current = s;
+    }
+    links.forEach(a => a.classList.remove('active'));
+    current.a.classList.add('active');
+  }
+  window.addEventListener('scroll', update, {passive: true});
+  update();
+})();
+
+// --- Pan & zoom for schematic viewports ---
+document.querySelectorAll('.schematic-viewport').forEach(vp => {
+  const container = vp.querySelector('.svg-container');
+  const img = container.querySelector('img');
+  let scale = 1, panX = 0, panY = 0;
+  let dragging = false, startX, startY, startPanX, startPanY;
+
+  function apply() {
+    container.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+  }
+
+  // Fit to viewport on load
+  img.addEventListener('load', () => fitToBox(vp));
+
+  // Mouse wheel zoom
+  vp.addEventListener('wheel', e => {
+    e.preventDefault();
+    const rect = vp.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+    const newScale = Math.max(0.02, Math.min(20, scale * factor));
+    // Zoom toward cursor
+    panX = mx - (mx - panX) * (newScale / scale);
+    panY = my - (my - panY) * (newScale / scale);
+    scale = newScale;
+    apply();
+  }, {passive: false});
+
+  // Pan with mouse drag
+  vp.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    dragging = true;
+    startX = e.clientX; startY = e.clientY;
+    startPanX = panX; startPanY = panY;
+  });
+  window.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    panX = startPanX + (e.clientX - startX);
+    panY = startPanY + (e.clientY - startY);
+    apply();
+  });
+  window.addEventListener('mouseup', () => { dragging = false; });
+
+  // Store state on the viewport element for button access
+  vp._pz = { getScale: () => scale, setView: (s, x, y) => { scale = s; panX = x; panY = y; apply(); } };
+});
+
+function getVP(btn) { return btn.closest('.schematic-viewport'); }
+
+function fitToBox(vp) {
+  const img = vp.querySelector('img');
+  const rect = vp.getBoundingClientRect();
+  const sx = rect.width / img.naturalWidth;
+  const sy = rect.height / img.naturalHeight;
+  const s = Math.min(sx, sy) * 0.95;
+  const px = (rect.width - img.naturalWidth * s) / 2;
+  const py = (rect.height - img.naturalHeight * s) / 2;
+  vp._pz.setView(s, px, py);
+}
+
+function zoomFit(btn) { fitToBox(getVP(btn)); }
+function zoomIn(btn) {
+  const vp = getVP(btn); const s = vp._pz.getScale();
+  const rect = vp.getBoundingClientRect();
+  const cx = rect.width / 2, cy = rect.height / 2;
+  // Zoom toward center
+  const container = vp.querySelector('.svg-container');
+  const t = new DOMMatrix(getComputedStyle(container).transform);
+  const newS = s * 1.4;
+  vp._pz.setView(newS, cx - (cx - t.e) * (newS / s), cy - (cy - t.f) * (newS / s));
+}
+function zoomOut(btn) {
+  const vp = getVP(btn); const s = vp._pz.getScale();
+  const rect = vp.getBoundingClientRect();
+  const cx = rect.width / 2, cy = rect.height / 2;
+  const container = vp.querySelector('.svg-container');
+  const t = new DOMMatrix(getComputedStyle(container).transform);
+  const newS = s / 1.4;
+  vp._pz.setView(newS, cx - (cx - t.e) * (newS / s), cy - (cy - t.f) * (newS / s));
+}
+function zoom100(btn) {
+  const vp = getVP(btn);
+  const rect = vp.getBoundingClientRect();
+  vp._pz.setView(1, 0, 0);
+}
+</script>
+
+</body>
+</html>

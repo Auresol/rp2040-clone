@@ -381,6 +381,10 @@ tr:hover td { background: var(--bg2); }
 
 /* scroll offset for fixed sidebar */
 .module-section { scroll-margin-top: 16px; }
+
+/* Mermaid diagram */
+.mermaid { background: var(--bg2); border-radius: 4px; padding: 16px; margin: 8px 0; }
+.mermaid svg { max-width: 100%; height: auto; }
 """
 
 SCRIPT = """
@@ -413,6 +417,418 @@ SCRIPT = """
 
 
 # ---------------------------------------------------------------------------
+# Mermaid block diagram extractor
+
+def extract_block_diagram(sv_path):
+    """Parse SV source and generate a Mermaid block diagram string.
+
+    Extracts: I/O ports, FIFOs, FSMs, register groups, sub-module instances,
+    and infers data flow edges between them.
+    """
+    source = open(sv_path).read()
+    lines = source.split('\n')
+
+    # --- Extract module ports ---
+    inputs = []
+    outputs = []
+    in_module = False
+    for line in lines:
+        stripped = line.strip()
+        if re.match(r'module\s+\w+', stripped):
+            in_module = True
+        if in_module:
+            # Skip clk, rst, AHB boilerplate
+            if re.match(r'(input|output)\s+wire\s+.*\b(clk|rst_n|haddr|hwrite|htrans|hsize|hwdata|hrdata|hready|hresp)\b', stripped):
+                continue
+            m = re.match(r'input\s+wire\s+(?:\[[\d:]+\]\s+)?(\w+)', stripped)
+            if m:
+                inputs.append(m.group(1))
+            m = re.match(r'output\s+(?:wire|reg)\s+(?:\[[\d:]+\]\s+)?(\w+)', stripped)
+            if m:
+                outputs.append(m.group(1))
+            if stripped.startswith(');'):
+                break
+
+    # --- Extract FIFOs (reg arrays with _mem suffix, or _wptr/_rptr pairs) ---
+    fifos = []
+    fifo_names = set()
+    # Method 1: explicit mem arrays like "reg [7:0] tx_mem [0:7]" or "[0:DEPTH-1]"
+    for line in lines:
+        m = re.match(r'\s*reg\s+\[[\d:]+\]\s+(\w+_mem)\s*\[0:(.+?)\]\s*;', line)
+        if m:
+            name = m.group(1)
+            bound_str = m.group(2).strip()
+            # Try to resolve depth
+            try:
+                depth = int(bound_str) + 1
+            except ValueError:
+                depth = 0  # parameterized — unknown
+            prefix = name.replace('_mem', '').upper()
+            fifos.append((prefix, depth))
+            fifo_names.add(name.replace('_mem', ''))
+    # Method 2: detect _wptr/_rptr pairs without _mem array
+    wptr_prefixes = set()
+    for line in lines:
+        m = re.match(r'\s*reg\s+\[[\d:]+\]\s+(\w+)_wptr\b', line)
+        if m:
+            wptr_prefixes.add(m.group(1))
+    for line in lines:
+        m = re.match(r'\s*reg\s+\[[\d:]+\]\s+(\w+)_rptr\b', line)
+        if m and m.group(1) in wptr_prefixes and m.group(1) not in fifo_names:
+            prefix = m.group(1).upper()
+            fifos.append((prefix, 0))
+            fifo_names.add(m.group(1))
+
+    # Try to resolve FIFO depths from localparam
+    depth_params = {}
+    for line in lines:
+        m = re.match(r'\s*localparam\s+(?:\[[\d:]+\]\s+)?(\w+)\s*=\s*(\d+)', line)
+        if m:
+            depth_params[m.group(1)] = int(m.group(2))
+    for i, (prefix, depth) in enumerate(fifos):
+        if depth == 0:
+            # Look for FIFO_DEPTH or similar
+            for pname, pval in depth_params.items():
+                if 'DEPTH' in pname or 'SIZE' in pname:
+                    fifos[i] = (prefix, pval)
+                    break
+
+    # --- Extract FSMs (localparam groups with _IDLE/_START etc.) ---
+    fsm_prefixes = set()
+    fsm_states = {}
+    for line in lines:
+        m = re.match(r'\s*localparam\s+\[[\d:]+\]\s+([A-Z]+)_(\w+)\s*=', line)
+        if m:
+            prefix = m.group(1)
+            state = m.group(2)
+            if prefix not in ('ADDR', 'FIFO', 'SEL'):
+                fsm_prefixes.add(prefix)
+                fsm_states.setdefault(prefix, []).append(state)
+
+    # --- Extract sub-module instances ---
+    submodules = []
+    for line in lines:
+        m = re.match(r'\s*(\w+)\s+(?:#\s*\([^)]*\)\s+)?(\w+)\s*\(', line)
+        if m:
+            mod_type = m.group(1)
+            inst_name = m.group(2)
+            # Skip keywords and parameter declarations
+            if mod_type not in ('module', 'assign', 'always', 'if', 'else', 'case',
+                                'wire', 'reg', 'input', 'output', 'localparam',
+                                'generate', 'for', 'function', 'begin', 'end'):
+                submodules.append((mod_type, inst_name))
+
+    # --- Extract register groups from comments ---
+    reg_groups = []
+    for line in lines:
+        m = re.match(r'\s*//\s*[-=]+\s*$', line)
+        if m:
+            continue
+        m = re.match(r'\s*//\s+([\w\s]+)(?:registers?|handler|logic|machine)', line, re.I)
+        if m:
+            name = m.group(1).strip()
+            if name and len(name) < 40:
+                reg_groups.append(name)
+
+    # --- Extract config register names ---
+    config_regs = []
+    in_config = False
+    for line in lines:
+        if re.search(r'config|control|setting', line, re.I) and line.strip().startswith('//'):
+            in_config = True
+            continue
+        if in_config:
+            m = re.match(r'\s*reg\s+(?:\[[\d:]+\]\s+)?(\w+)\s*;', line)
+            if m:
+                config_regs.append(m.group(1))
+            elif line.strip().startswith('//') and re.match(r'\s*//\s*[-=]+', line):
+                in_config = False
+
+    # --- Build mermaid diagram ---
+    nodes = []
+    edges = []
+    node_ids = set()
+
+    def add_node(nid, label, shape='rect'):
+        if nid not in node_ids:
+            node_ids.add(nid)
+            if shape == 'round':
+                nodes.append(f'    {nid}(["{label}"])')
+            elif shape == 'hex':
+                nodes.append(f'    {nid}{{{{{label}}}}}')
+            elif shape == 'stadium':
+                nodes.append(f'    {nid}(["{label}"])')
+            elif shape == 'cylinder':
+                nodes.append(f'    {nid}[("{label}")]')
+            else:
+                nodes.append(f'    {nid}["{label}"]')
+
+    # AHB bus interface
+    add_node('AHB', 'AHB Bus', 'round')
+
+    # Register decode
+    add_node('REG_DECODE', 'Register\\nDecode')
+    edges.append('    AHB --> REG_DECODE')
+
+    # Config registers (if any)
+    if config_regs:
+        label = 'Config Regs\\n' + ', '.join(config_regs[:6])
+        if len(config_regs) > 6:
+            label += f'\\n+{len(config_regs)-6} more'
+        add_node('CONFIG', label)
+        edges.append('    REG_DECODE --> CONFIG')
+
+    # FIFOs
+    for prefix, depth in fifos:
+        nid = f'FIFO_{prefix}'
+        depth_str = f'\\n{depth}-deep' if depth > 0 else ''
+        add_node(nid, f'{prefix} FIFO{depth_str}', 'cylinder')
+
+    # FSMs
+    for prefix in sorted(fsm_prefixes):
+        nid = f'FSM_{prefix}'
+        states = fsm_states.get(prefix, [])
+        state_str = ', '.join(states[:5])
+        if len(states) > 5:
+            state_str += '...'
+        add_node(nid, f'{prefix} FSM\\n{state_str}', 'hex')
+
+    # Connect FIFOs <-> FSMs and register decode based on TX/RX semantics:
+    #   TX path: CPU --> REG_DECODE --> TX_FIFO --> TX_FSM --> tx_pin
+    #   RX path: rx_pin --> RX_FSM --> RX_FIFO --> READ_MUX --> CPU
+    for prefix, _ in fifos:
+        p = prefix.lower()
+        fifo_nid = f'FIFO_{prefix}'
+        fsm_nid = f'FSM_{prefix}' if prefix in fsm_prefixes else None
+
+        if 'tx' in p:
+            # Write path: decode -> fifo -> fsm
+            edges.append(f'    REG_DECODE --> {fifo_nid}')
+            if fsm_nid:
+                edges.append(f'    {fifo_nid} --> {fsm_nid}')
+        elif 'rx' in p:
+            # Read path: fsm -> fifo -> read mux
+            if fsm_nid:
+                edges.append(f'    {fsm_nid} --> {fifo_nid}')
+        else:
+            # Generic: both directions
+            edges.append(f'    REG_DECODE --> {fifo_nid}')
+            if fsm_nid:
+                edges.append(f'    {fifo_nid} --> {fsm_nid}')
+
+    # FSMs without a matching FIFO get connected to config
+    for prefix in sorted(fsm_prefixes):
+        p = prefix.lower()
+        has_fifo = any(p in fp.lower() for fp, _ in fifos)
+        if not has_fifo and config_regs:
+            edges.append(f'    CONFIG --> FSM_{prefix}')
+
+    # Sub-module instances
+    for mod_type, inst_name in submodules:
+        nid = f'SUB_{inst_name}'
+        add_node(nid, f'{inst_name}\\n({mod_type})')
+        edges.append(f'    REG_DECODE --> {nid}')
+
+    # I/O ports — smart connection based on name matching
+    for inp in inputs:
+        nid = f'IN_{inp}'
+        add_node(nid, inp, 'round')
+        inp_lower = inp.lower()
+
+        # Match to FSM by prefix (e.g. uart_rx -> RX FSM, spi_miso -> RX FSM)
+        connected = False
+        for prefix in fsm_prefixes:
+            pl = prefix.lower()
+            if pl in inp_lower or (pl == 'rx' and ('miso' in inp_lower or 'rx' in inp_lower)):
+                edges.append(f'    {nid} --> FSM_{prefix}')
+                connected = True
+                break
+
+        # CTS-like flow control inputs connect to TX FSM
+        if not connected and ('cts' in inp_lower):
+            for prefix in fsm_prefixes:
+                if prefix.lower() == 'tx':
+                    edges.append(f'    {nid} --> FSM_{prefix}')
+                    connected = True
+                    break
+
+        if not connected:
+            edges.append(f'    {nid} --> REG_DECODE')
+
+    for out in outputs:
+        nid = f'OUT_{out}'
+        add_node(nid, out, 'round')
+        out_lower = out.lower()
+
+        connected = False
+        # TX pin / MOSI / SCLK -> from TX FSM
+        for prefix in fsm_prefixes:
+            pl = prefix.lower()
+            if pl in out_lower or (pl == 'tx' and ('mosi' in out_lower or 'sclk' in out_lower or 'tx' in out_lower)):
+                edges.append(f'    FSM_{prefix} --> {nid}')
+                connected = True
+                break
+
+        if not connected:
+            # RTS connects from RX FIFO status
+            if 'rts' in out_lower:
+                for fp, _ in fifos:
+                    if 'rx' in fp.lower():
+                        edges.append(f'    FIFO_{fp} --> {nid}')
+                        connected = True
+                        break
+            # IRQ comes from interrupt logic (config + fifo levels)
+            elif 'irq' in out_lower:
+                add_node('IRQ_LOGIC', 'IRQ Logic\\n(mask & status)')
+                if config_regs:
+                    edges.append(f'    CONFIG --> IRQ_LOGIC')
+                for fp, _ in fifos:
+                    edges.append(f'    FIFO_{fp} -.-> IRQ_LOGIC')
+                edges.append(f'    IRQ_LOGIC --> {nid}')
+                connected = True
+            # DREQ (DMA request) comes from FIFO status
+            elif 'dreq' in out_lower:
+                for fp, _ in fifos:
+                    if fp.lower() in out_lower:
+                        edges.append(f'    FIFO_{fp} --> {nid}')
+                        connected = True
+                        break
+
+        if not connected:
+            edges.append(f'    REG_DECODE --> {nid}')
+
+    # Config feeds all FSMs (baud rate, enable, etc.)
+    if config_regs:
+        for prefix in fsm_prefixes:
+            edges.append(f'    CONFIG -.-> FSM_{prefix}')
+
+    # Read path
+    add_node('READ_MUX', 'Read Mux\\n(hrdata)')
+    edges.append('    READ_MUX --> AHB')
+    if config_regs:
+        edges.append('    CONFIG --> READ_MUX')
+    for prefix, _ in fifos:
+        # Only RX-like FIFOs feed the read mux (CPU reads from them)
+        if 'rx' in prefix.lower():
+            edges.append(f'    FIFO_{prefix} --> READ_MUX')
+
+    # Build final mermaid string
+    mermaid = 'graph TD\n'
+    mermaid += '\n'.join(nodes) + '\n'
+    mermaid += '\n'.join(edges) + '\n'
+
+    return mermaid
+
+
+# ---------------------------------------------------------------------------
+# SoC-level data flow diagram (parsed from rxpsm32.sv)
+
+def build_soc_diagram():
+    """Generate mermaid diagram of the SoC-level data flow from rxpsm32.sv."""
+    soc_path = RTL / 'rxpsm32.sv'
+    if not soc_path.exists():
+        return None
+
+    source = open(soc_path).read()
+    lines = source.split('\n')
+
+    # Extract top-level I/O ports (skip clk/rst)
+    io_ports = {}  # name -> 'input'|'output'
+    in_module = False
+    for line in lines:
+        stripped = line.strip()
+        if re.match(r'module\s+rxpsm32', stripped):
+            in_module = True
+        if in_module:
+            if re.match(r'(input|output)\s+wire\s+.*\b(clk|rst_n)\b', stripped):
+                continue
+            m = re.match(r'(input|output)\s+wire\s+(?:\[[\d:]+\]\s+)?(\w+)', stripped)
+            if m:
+                io_ports[m.group(2)] = m.group(1)
+            if stripped == ');':
+                break
+
+    # Extract crossbar address map (packed MSB-first, so reverse for natural order)
+    slaves = []
+    in_addr_map = False
+    for line in lines:
+        if 'XBAR_D_ADDR_MAP' in line and 'localparam' in line:
+            in_addr_map = True
+            continue
+        if in_addr_map:
+            m = re.match(r"\s*32'h([\w_]+)\s*,?\s*//\s*\d+:\s*(\w+)", line)
+            if m:
+                addr = '0x' + m.group(1).replace('_', '')
+                name = m.group(2)
+                slaves.append((name, addr))
+            if '};' in line:
+                break
+    slaves.reverse()  # natural order: SRAM first
+
+    # Map peripherals to their external pins
+    peripheral_pins = {
+        'GPIO':     ['gpio_in', 'gpio_out', 'gpio_oe'],
+        'PIO0':     ['pio_gpio_in', 'pio_gpio_out', 'pio_gpio_oe', 'pio_irq[3:0]'],
+        'PIO1':     ['pio_gpio_in', 'pio_gpio_out', 'pio_gpio_oe', 'pio_irq[7:4]'],
+        'UART0':    ['uart_tx', 'uart_rx'],
+        'SPI0':     ['spi0_sclk', 'spi0_mosi', 'spi0_miso', 'spi0_cs_n'],
+        'WATCHDOG': ['wdog_reset'],
+        'RESET':    ['periph_rst_n'],
+    }
+
+    # Build mermaid
+    m = 'graph TD\n'
+
+    # JTAG + Debug
+    m += '    JTAG(["JTAG\\ntck/tms/tdi/tdo"]) --> DTM["JTAG DTM"] --> DM["Debug Module"]\n'
+    m += '    DM --> CPU\n'
+
+    # CPU
+    m += '    CPU{{"CPU0\\nHazard3 RV32IMC"}}\n'
+
+    # SRAM — shared by I-port and D-port
+    m += '    SRAM[("SRAM\\n64KB")]\n'
+
+    # Instruction port
+    m += '    CPU -- "I-port" --> I_DEC["i_decoder\\n1:2"]\n'
+    m += '    I_DEC -- "I-port" --> SRAM\n'
+    m += '    I_DEC --> XIP["XIP Cache\\n+ SPI Flash"]\n'
+    m += '    XIP --> SPI_FLASH(["spi_cs_n / spi_sck\\nspi_mosi / spi_miso"])\n'
+
+    # Data port crossbar
+    m += '    CPU -- "D-port" --> XBAR["Crossbar\\n1x10"]\n'
+    m += '    XBAR -- "D-port" --> SRAM\n'
+
+    # Crossbar slaves (skip SRAM — handled above)
+    for name, addr in slaves:
+        if name == 'SRAM':
+            continue
+        nid = f'S_{name}'
+        label = f'{name}\\n{addr}'
+        m += f'    XBAR --> {nid}["{label}"]\n'
+
+        # External pins
+        pins = peripheral_pins.get(name, [])
+        if pins:
+            pin_label = '\\n'.join(pins[:3])
+            if len(pins) > 3:
+                pin_label += f'\\n+{len(pins)-3} more'
+            pin_nid = f'PIN_{name}'
+            m += f'    {nid} --> {pin_nid}(["{pin_label}"])\n'
+
+    # IRQ connections (dashed)
+    m += '    S_UART0 -.-> |irq| CPU\n'
+    m += '    S_SPI0 -.-> |irq| CPU\n'
+    m += '    S_TIMER -.-> |timer_irq| CPU\n'
+
+    # Reset path
+    m += '    S_WATCHDOG -.-> |wdog_reset| S_RESET\n'
+    m += '    S_RESET -.-> |periph_rst_n| CPU\n'
+
+    return m
+
+
+# ---------------------------------------------------------------------------
 # Module section builder
 
 def build_module_section(module, sv_rel_path, run_yosys=True):
@@ -434,6 +850,14 @@ def build_module_section(module, sv_rel_path, run_yosys=True):
         key_signals = yosys_key_signals(sv_path, module)
 
     desc = get_first_header_line(sv_path)
+
+    # Block diagram
+    try:
+        mermaid_src = extract_block_diagram(sv_path)
+        diagram_html = (f'<div class="mermaid">\n{mermaid_src}</div>')
+    except Exception as e:
+        print(f'  Block diagram skipped: {e}')
+        diagram_html = '<p style="color:#666"><em>Block diagram generation failed.</em></p>'
 
     # Key signals
     if key_signals:
@@ -534,7 +958,8 @@ def build_module_section(module, sv_rel_path, run_yosys=True):
 <h1>{module}.sv</h1>
 <p style="color:#555">{escape(desc)}</p>
 
-{det("Module header", header_html, open_=True) if header_html else ""}
+{det("Block diagram", diagram_html)}
+{det("Module header", header_html) if header_html else ""}
 {det("Key signals", key_html)}
 {det("Registers", reg_html, open_=True)}
 {det("Address decoder", addr_html)}
@@ -563,8 +988,17 @@ def main():
         has_yosys = False
         print('Yosys not found — skipping fanout analysis')
 
+    # Build SoC-level overview diagram
+    print('[overall]')
+    overview_html = '''<div class="module-section" id="overall">
+<h1>SoC Overview</h1>
+<p style="color:#555">RP2350 reference architecture.</p>
+<img src="rp2350/rp2350-architecture.jpg" style="max-width:100%;border-radius:4px;margin:8px 0" alt="RP2350 Architecture">
+</div>
+'''
+
     # Build sidebar
-    sidebar_links = ''
+    sidebar_links = '<h2>SoC</h2>\n<a href="#overall">Overall</a>\n'
     for group_name, modules in GROUPS:
         sidebar_links += f'<h2>{group_name}</h2>\n'
         for name, sv_rel in modules:
@@ -580,7 +1014,7 @@ def main():
 </nav>'''
 
     # Build all module sections
-    sections = ''
+    sections = overview_html
     for group_name, modules in GROUPS:
         for name, sv_rel in modules:
             print(f'[{name}]')
@@ -595,6 +1029,8 @@ def main():
 <meta charset="utf-8">
 <title>rxpsm32 — SoC documentation</title>
 <style>{CSS}</style>
+<script src="mermaid.min.js"></script>
+<script>mermaid.initialize({{startOnLoad:true,theme:'dark',themeVariables:{{primaryColor:'#2a3a2a',primaryTextColor:'#d4d4d4',lineColor:'#4ec9b0',edgeLabelBackground:'#252526'}}}});</script>
 </head>
 <body>
 {sidebar}

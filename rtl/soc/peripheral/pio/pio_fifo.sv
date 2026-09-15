@@ -21,8 +21,8 @@ module pio_fifo (
     output wire [3:0]  level       // 0..8
 );
 
-// Storage
-reg [31:0] mem [0:7];
+// Storage: distributed RAM — 8×32 = 256 bits → 32 LUT6s, frees ~256 FFs vs FF-based inference
+(* ram_style = "distributed" *) reg [31:0] mem [0:7];
 
 // Pointers and count (extra bit on ptrs for full/empty disambiguation not needed
 // because we track cnt explicitly)
@@ -38,19 +38,22 @@ assign empty = (cnt == 4'd0);
 assign level = cnt;
 assign rdata = mem[rptr];
 
+// mem in its own clk-only block so Vivado can infer distributed RAM.
+// LUTRAM cannot have async-reset sensitivity even if mem isn't reset —
+// mixing mem with rst_n in one always block poisons the inference.
+always @(posedge clk) begin
+    if (do_push)
+        mem[wptr] <= wdata;
+end
+
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         wptr <= 3'd0;
         rptr <= 3'd0;
         cnt  <= 4'd0;
     end else begin
-        if (do_push) begin
-            mem[wptr] <= wdata;
-            wptr      <= wptr + 3'd1;
-        end
-        if (do_pop) begin
-            rptr <= rptr + 3'd1;
-        end
+        if (do_push) wptr <= wptr + 3'd1;
+        if (do_pop)  rptr <= rptr + 3'd1;
         case ({do_push, do_pop})
             2'b10:   cnt <= cnt + 4'd1;
             2'b01:   cnt <= cnt - 4'd1;

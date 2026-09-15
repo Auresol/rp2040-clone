@@ -11,21 +11,21 @@ _start:
 
     li   s0, 0x40000000      # GPIO base address
 
-    # Write a pattern and read it back
+    # Write a pattern to OUT (offset 0x04) and read it back
     li   t0, 0xA5A5A5A5
-    sw   t0, 0(s0)
-    lw   t1, 0(s0)
+    sw   t0, 0x04(s0)
+    lw   t1, 0x04(s0)
     bne  t0, t1, fail
 
     # Write a second pattern to confirm the register updates
     li   t0, 0x12345678
-    sw   t0, 0(s0)
-    lw   t1, 0(s0)
+    sw   t0, 0x04(s0)
+    lw   t1, 0x04(s0)
     bne  t0, t1, fail
 
     # Write zero and verify (checks reset-to-zero behaviour)
-    sw   zero, 0(s0)
-    lw   t1, 0(s0)
+    sw   zero, 0x04(s0)
+    lw   t1, 0x04(s0)
     bne  t1, zero, fail
 
 pass:

@@ -1,8 +1,8 @@
-// 1-master, 2-slave AHB-Lite address decoder.
+// ahb_i_decoder.sv — 1-master, 2-slave AHB-Lite instruction-port decoder.
 //
-// Address map (hardcoded for M4):
-//   0x0000_0000 – 0x0000_FFFF  →  slave 0 (SRAM)
-//   0x4000_0000 – 0x4000_FFFF  →  slave 1 (GPIO)
+// Address map:
+//   0x0000_0000 – 0x0000_FFFF  →  slave 0 (SRAM I port)
+//   0x1000_0000 – 0x1FFF_FFFF  →  slave 1 (XIP flash)
 //   everything else             →  slave 0 (SRAM, default)
 //
 // Routing uses two muxes:
@@ -14,11 +14,11 @@
 
 `default_nettype none
 
-module ahb_decoder (
+module ahb_i_decoder (
     input  wire        clk,
     input  wire        rst_n,
 
-    // Master port (from arbiter)
+    // Master port (from CPU instruction port)
     input  wire [31:0] m_haddr,
     input  wire        m_hwrite,
     input  wire [1:0]  m_htrans,
@@ -28,7 +28,7 @@ module ahb_decoder (
     output wire        m_hready,
     output wire        m_hresp,
 
-    // Slave 0 — SRAM
+    // Slave 0 — SRAM I port
     output wire [31:0] s0_haddr,
     output wire        s0_hwrite,
     output wire [1:0]  s0_htrans,
@@ -38,7 +38,7 @@ module ahb_decoder (
     input  wire        s0_hready,
     input  wire        s0_hresp,
 
-    // Slave 1 — GPIO
+    // Slave 1 — XIP flash
     output wire [31:0] s1_haddr,
     output wire        s1_hwrite,
     output wire [1:0]  s1_htrans,
@@ -53,9 +53,9 @@ module ahb_decoder (
 // Address decode
 
 localparam SEL_SRAM = 1'b0;
-localparam SEL_GPIO = 1'b1;
+localparam SEL_XIP  = 1'b1;
 
-wire sel = (m_haddr[31:16] == 16'h4000) ? SEL_GPIO : SEL_SRAM;
+wire sel = (m_haddr[31:28] == 4'h1) ? SEL_XIP : SEL_SRAM;
 
 // Register sel so the data-phase response mux uses the same slave
 // that received the address phase one cycle earlier.
@@ -69,7 +69,7 @@ end
 // Address-phase mux: forward to selected slave, send IDLE to others
 
 assign s0_htrans = (sel == SEL_SRAM) ? m_htrans : 2'b00;
-assign s1_htrans = (sel == SEL_GPIO) ? m_htrans : 2'b00;
+assign s1_htrans = (sel == SEL_XIP)  ? m_htrans : 2'b00;
 
 // Address, control, and write data broadcast to all slaves.
 // Non-selected slaves see htrans=IDLE so they ignore the transaction.
@@ -86,8 +86,8 @@ assign s1_hwdata = m_hwdata;
 // ----------------------------------------------------------------------------
 // Data-phase mux: return response from whichever slave was selected last cycle
 
-assign m_hrdata = (sel_r == SEL_GPIO) ? s1_hrdata : s0_hrdata;
-assign m_hready = (sel_r == SEL_GPIO) ? s1_hready : s0_hready;
-assign m_hresp  = (sel_r == SEL_GPIO) ? s1_hresp  : s0_hresp;
+assign m_hrdata = (sel_r == SEL_XIP) ? s1_hrdata : s0_hrdata;
+assign m_hready = (sel_r == SEL_XIP) ? s1_hready : s0_hready;
+assign m_hresp  = (sel_r == SEL_XIP) ? s1_hresp  : s0_hresp;
 
 endmodule

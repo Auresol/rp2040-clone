@@ -1,0 +1,1214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Project Handoff — rp2040-clone</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1a1d27;
+      --border:   #2a2d3a;
+      --accent:   #5b8dee;
+      --warn:     #e0a030;
+      --ok:       #3db87a;
+      --text:     #d4d8e8;
+      --muted:    #7a7f99;
+      --code-bg:  #131620;
+      --mono:     "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+      --sans:     -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 15px;
+      line-height: 1.7;
+      padding: 2rem 1rem 4rem;
+    }
+
+    .page {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    /* ── Header ── */
+    header {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 1.5rem;
+      margin-bottom: 2.5rem;
+    }
+    header h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: #fff;
+    }
+    header .subtitle {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin-top: 0.3rem;
+    }
+
+    /* ── Nav ── */
+    nav {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 2.5rem;
+    }
+    nav p {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 0.6rem;
+    }
+    nav ol {
+      padding-left: 1.2rem;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.2rem 2rem;
+    }
+    nav a {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.9rem;
+    }
+    nav a:hover { text-decoration: underline; }
+
+    /* ── Section headings ── */
+    h2 {
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: #fff;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.4rem;
+      margin: 2.5rem 0 1rem;
+    }
+    h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--accent);
+      margin: 1.5rem 0 0.5rem;
+    }
+
+    /* ── Paragraphs ── */
+    p { margin-bottom: 0.9rem; }
+
+    /* ── Inline code ── */
+    code {
+      font-family: var(--mono);
+      font-size: 0.82em;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 0.1em 0.35em;
+      color: #c9d1f5;
+    }
+
+    /* ── Code blocks ── */
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem 1.25rem;
+      overflow-x: auto;
+      margin: 0.75rem 0 1.25rem;
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      line-height: 1.6;
+      color: #c9d1f5;
+    }
+    pre code {
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: inherit;
+    }
+
+    /* ── Tables ── */
+    .table-wrap { overflow-x: auto; margin: 0.75rem 0 1.25rem; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+    }
+    thead tr { background: var(--surface); }
+    th {
+      text-align: left;
+      padding: 0.55rem 0.9rem;
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      border-bottom: 1px solid var(--border);
+    }
+    td {
+      padding: 0.5rem 0.9rem;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    tr:last-child td { border-bottom: none; }
+    tbody tr:hover { background: rgba(255,255,255,0.03); }
+
+    /* status badges */
+    .pass {
+      display: inline-block;
+      background: rgba(61,184,122,0.15);
+      color: var(--ok);
+      border: 1px solid rgba(61,184,122,0.35);
+      border-radius: 4px;
+      padding: 0.05em 0.5em;
+      font-size: 0.78rem;
+      font-weight: 600;
+      font-family: var(--mono);
+    }
+    .pending {
+      display: inline-block;
+      background: rgba(224,160,48,0.12);
+      color: var(--warn);
+      border: 1px solid rgba(224,160,48,0.3);
+      border-radius: 4px;
+      padding: 0.05em 0.5em;
+      font-size: 0.78rem;
+      font-weight: 600;
+      font-family: var(--mono);
+    }
+
+    /* utilisation bar */
+    .util-bar-wrap {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .util-bar {
+      flex: 1;
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+      min-width: 60px;
+    }
+    .util-bar-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 3px;
+    }
+    .util-pct {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      color: var(--muted);
+      min-width: 3rem;
+      text-align: right;
+    }
+
+    /* ── ADR cards ── */
+    .adr {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: 6px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1rem;
+    }
+    .adr-title {
+      font-weight: 700;
+      font-size: 0.95rem;
+      color: #fff;
+      margin-bottom: 0.6rem;
+    }
+    .adr-label {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--muted);
+      margin-top: 0.6rem;
+      margin-bottom: 0.2rem;
+    }
+
+    /* ── Concept boxes ── */
+    .concept {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid #7c5cbf;
+      border-radius: 6px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1rem;
+    }
+    .concept-title {
+      font-weight: 700;
+      font-size: 0.95rem;
+      color: #c9aff5;
+      margin-bottom: 0.6rem;
+    }
+
+    /* ── Team cards ── */
+    .team-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.1rem 1.35rem;
+      margin-bottom: 1rem;
+    }
+    .team-name {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 0.2rem;
+    }
+    .team-role {
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--accent);
+      margin-bottom: 0.8rem;
+    }
+    .team-label {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--muted);
+      margin-top: 0.75rem;
+      margin-bottom: 0.2rem;
+    }
+
+    /* ── Known issues ── */
+    .issue {
+      background: rgba(224,160,48,0.07);
+      border: 1px solid rgba(224,160,48,0.25);
+      border-left: 3px solid var(--warn);
+      border-radius: 6px;
+      padding: 0.85rem 1.1rem;
+      margin-bottom: 0.75rem;
+    }
+    .issue strong { color: var(--warn); }
+
+    /* ── Next work ── */
+    .next-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.85rem 1.1rem;
+      margin-bottom: 0.6rem;
+    }
+    .next-item strong { color: #fff; }
+
+    /* ── Misc ── */
+    strong { color: #e0e4f8; }
+    a { color: var(--accent); }
+    a:hover { text-decoration: underline; }
+    ul { padding-left: 1.4rem; margin-bottom: 0.9rem; }
+    ul li { margin-bottom: 0.3rem; }
+
+    @media (max-width: 600px) {
+      nav ol { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <h1>Project Handoff</h1>
+    <p class="subtitle">rp2040-clone &nbsp;·&nbsp; branch: <code>feat/single-core</code> &nbsp;·&nbsp; 2026-08-26</p>
+  </header>
+
+  <nav>
+    <p>Contents</p>
+    <ol>
+      <li><a href="#what">What This Is</a></li>
+      <li><a href="#team">Team</a></li>
+      <li><a href="#background">Background Concepts</a></li>
+      <li><a href="#layout">Repository Layout</a></li>
+      <li><a href="#addrmap">Address Map</a></li>
+      <li><a href="#adrs">Architecture Decisions</a></li>
+      <li><a href="#state">Current State</a></li>
+      <li><a href="#build">Build &amp; Deploy</a></li>
+      <li><a href="#next">Next Work</a></li>
+    </ol>
+  </nav>
+
+  <!-- ── What This Is ────────────────────────────────────────────── -->
+  <section id="what">
+    <h2>What This Is</h2>
+
+    <p>
+      A <strong>microcontroller</strong> is a chip that contains three things in one package:
+      a <strong>CPU</strong> (the thing that runs instructions), <strong>memory</strong>
+      (where those instructions and data live), and <strong>peripherals</strong> (circuits
+      that talk to the outside world — toggling a pin, sending a pulse, reading a button).
+      The RP2040 is one such chip, made by Raspberry Pi.
+    </p>
+    <p>
+      This project builds a microcontroller from scratch that works the same way. Instead
+      of designing physical silicon directly, everything is described in
+      <strong>RTL</strong> (Register Transfer Level) — a hardware description language
+      called SystemVerilog. That description is then either simulated on a PC
+      (for testing), mapped onto an FPGA (for running on real hardware), or
+      eventually sent to a chip foundry to be fabricated in silicon.
+    </p>
+    <p>
+      The current target is the <strong>AMD Kria KR260</strong>, a development board that
+      contains an FPGA. The FPGA is loaded with a bitstream (see
+      <a href="#background">Background Concepts</a>) that makes it behave like the
+      microcontroller. The RPi 40-pin header on the KR260 is where the GPIO pins come out.
+    </p>
+    <p>
+      The CPU inside this microcontroller is <strong>Hazard3</strong>, an open-source core
+      that implements the RISC-V instruction set. The rest of the SoC (System on Chip)
+      connects it to 64 KB of memory, a GPIO peripheral, and a PIO subsystem copied from
+      the RP2040.
+    </p>
+  </section>
+
+  <!-- ── Team ───────────────────────────────────────────────────── -->
+  <section id="team">
+    <h2>Team</h2>
+
+    <div class="team-card">
+      <div class="team-name">Mac</div>
+      <div class="team-role">Formal Verification</div>
+      <p>
+        Formal verification proves that the RTL is correct for <em>all possible inputs and
+        sequences of events</em>, not just the specific scenarios covered by simulation
+        tests. Instead of running a firmware binary and checking the output, you write
+        properties — statements that must always be true — and a solver mathematically
+        checks whether any sequence of inputs can violate them.
+      </p>
+      <p>
+        The tool used here is <strong>SymbiYosys</strong> (open source), which drives
+        solvers like Yices and Z3 on top of Yosys. Properties are written in SystemVerilog
+        assertions (<code>assert</code>, <code>assume</code>, <code>cover</code>).
+      </p>
+      <div class="team-label">Primary target — DMA controller</div>
+      <p>
+        DMA is a bus master that operates concurrently with the CPU. The most dangerous
+        class of bugs in concurrent bus masters are not caught by simulation because they
+        require a specific interleaving of CPU and DMA activity that tests rarely exercise.
+        Formal verification covers all interleavings automatically. Key properties to prove:
+      </p>
+      <ul>
+        <li>The DMA never issues a transaction to an address outside the range configured by the CPU.</li>
+        <li>The DMA never issues a write when configured for a read-only transfer, and vice versa.</li>
+        <li>Once a transfer is started, the DMA always completes it — it cannot deadlock waiting for <code>HREADY</code>.</li>
+        <li>The DMA relinquishes the bus between transfers so the CPU is never starved indefinitely.</li>
+        <li>The transfer count register reaches exactly zero when the transfer completes — no off-by-one.</li>
+      </ul>
+      <div class="team-label">Secondary target — AHB arbiter</div>
+      <p>
+        The arbiter on <code>main</code> has a known bug (two-cycle grant hold — see Known
+        Issues). The fix must be formally verified before dual-core is restored. Key
+        properties: the arbiter never grants both masters simultaneously; a master that
+        wins arbitration always gets a complete, uninterrupted transaction; a waiting
+        master is never starved forever.
+      </p>
+      <div class="team-label">Where to start</div>
+      <p style="margin-bottom:0">
+        Read the AHB-Lite and bus sections in Background Concepts first. Then read
+        <code>rtl/soc/fabric/ahb_arbiter.sv</code> and the Known Issues section. The
+        SymbiYosys documentation has a walkthrough for writing AHB protocol properties —
+        start there, apply it to the arbiter, then move to DMA once that is designed.
+      </p>
+    </div>
+
+    <div class="team-card">
+      <div class="team-name">Tonnam</div>
+      <div class="team-role">Developer Tooling — Pin Assignment IDE &amp; Debug Interface</div>
+      <p>
+        The RP2040 ecosystem has strong tooling: RP2040 datasheet, Pico SDK, and graphical
+        tools that make it easy to assign PIO programs to pins, configure clocks, and debug
+        firmware. This SoC needs the same.
+      </p>
+      <div class="team-label">Part 1 — Pin assignment tool</div>
+      <p>
+        A graphical tool modelled on STM32CubeMX. The user sees the RPi 40-pin header
+        diagram. Each pin can be assigned to a function: plain GPIO (driven by the GPIO
+        peripheral), PIO state machine output, PIO state machine input, side-set, etc.
+        The tool knows which functions are valid on which pins (derived from
+        <code>fpga_top_kr260.sv</code> and the mux logic). When the user finalises the
+        assignment, the tool generates:
+      </p>
+      <ul>
+        <li>An updated <code>fw/soc.h</code> with the correct <code>PIO_SMx_PINCTRL</code> register values pre-filled.</li>
+        <li>A <code>pinout.svg</code> diagram of the assignment for documentation.</li>
+        <li>Optionally, a skeleton firmware file with the pin initialisation sequence.</li>
+      </ul>
+      <div class="team-label">Part 2 — Debug interface</div>
+      <p>
+        Currently there is no way to inspect the SoC's internal state while it is running
+        on the KR260. Two approaches, in increasing complexity:
+      </p>
+      <ul>
+        <li>
+          <strong>MMIO debug peripheral (simpler)</strong> — a new AHB slave at a fixed
+          address that the Zynq PS can read from Linux. It exposes read-only windows into
+          the CPU's program counter, register file snapshot (sampled each N cycles), and
+          the PIO state machine states. The PS reads these over the AXI-to-AHB bridge
+          (once that bridge exists) and a small Python script on the board prints the
+          state — similar to a very simple logic analyser.
+        </li>
+        <li>
+          <strong>JTAG/SWD + GDB stub (harder)</strong> — implement a RISC-V debug module
+          (RISC-V debug specification 0.13) in RTL, exposing JTAG pins on the RPi header.
+          OpenOCD connects to the JTAG port and provides a GDB remote target. This lets
+          you set breakpoints, single-step, and inspect memory from GDB. Hazard3 has a
+          debug module port that is currently unconnected —
+          <code>rtl/core/hazard3/</code> contains the relevant interface files.
+        </li>
+      </ul>
+      <div class="team-label">Where to start</div>
+      <p style="margin-bottom:0">
+        Read Background Concepts (memory-mapped I/O, PIO, AHB-Lite) and
+        <code>fpga_top_kr260.sv</code> to understand the current pin mux. For the pin
+        tool, the data model is straightforward: a mapping from pin number to function
+        enum, constrained by what the mux supports. For debug, start with the MMIO
+        peripheral option — it can be built and tested before the AXI bridge exists by
+        reading from the PS side via <code>devmem2</code>.
+      </p>
+    </div>
+
+    <div class="team-card">
+      <div class="team-name">Dew</div>
+      <div class="team-role">Security — Crypto Accelerator &amp; Secure Boot</div>
+      <p>
+        Two separate but related pieces of work. Together they make the chip viable for
+        applications where the firmware must be trusted and data must be protected.
+      </p>
+      <div class="team-label">Part 1 — Crypto accelerator peripheral</div>
+      <p>
+        A new AHB-Lite slave peripheral that offloads cryptographic operations from the
+        CPU. Performing AES or SHA-256 in software on an RV32IMC core is slow and blocks
+        the CPU for the entire duration of the operation. A hardware accelerator completes
+        the same operation in a fixed, short number of clock cycles and raises an interrupt
+        when done, freeing the CPU.
+      </p>
+      <p>Suggested initial scope:</p>
+      <ul>
+        <li><strong>AES-128 / AES-256</strong> — block cipher, ECB and CTR modes minimum. The AES round function is highly parallelisable in hardware — a fully unrolled AES-128 encryption can complete in 10 clock cycles (one per round).</li>
+        <li><strong>SHA-256</strong> — cryptographic hash function. Used for integrity checks, signatures, and key derivation.</li>
+        <li><strong>TRNG (True Random Number Generator)</strong> — samples thermal noise from ring oscillators to produce unpredictable bits. Required for key generation. sky130 ring oscillators can be used as the entropy source.</li>
+      </ul>
+      <p>
+        The peripheral fits into the address map at <code>0x4001_0000</code> (currently
+        unassigned). The CPU writes plaintext and key into data registers, sets a control
+        register to start the operation, and polls a status register (or waits for an
+        interrupt) until the result is ready.
+      </p>
+      <div class="team-label">Part 2 — Secure boot</div>
+      <p>
+        Secure boot ensures the chip only executes firmware that has been signed with a
+        trusted key. Without it, anyone who can load a bitstream can run arbitrary code.
+        For a tapeout chip this is essential.
+      </p>
+      <p>The flow:</p>
+      <ul>
+        <li>A small <strong>ROM bootloader</strong> is baked into the chip at fabrication time (a separate read-only memory region, not the SRAM). It cannot be modified after tapeout.</li>
+        <li>On reset, the CPU executes the ROM bootloader. It reads the firmware from SRAM (or an external flash), computes a SHA-256 hash, and verifies an Ed25519 or ECDSA signature against a public key stored in <strong>OTP (One-Time Programmable)</strong> fuses — small cells that are programmed once after fabrication and cannot be changed.</li>
+        <li>If the signature is valid, the bootloader jumps to the firmware. If not, it halts.</li>
+      </ul>
+      <p>
+        The crypto accelerator (Part 1) is used by the bootloader to perform the hash and
+        signature check quickly.
+      </p>
+      <div class="team-label">Where to start</div>
+      <p style="margin-bottom:0">
+        Read Background Concepts (AHB-Lite, memory-mapped I/O) and <code>rtl/soc/peripheral/gpio.sv</code>
+        as a reference for how a simple AHB peripheral is structured — the crypto
+        accelerator follows the same pattern. Start with AES-128 in ECB mode only: write
+        the RTL for one AES round, verify it in simulation against known test vectors from
+        the NIST AES standard, then pipeline the 10 rounds. SHA-256 and the bootloader
+        come after.
+      </p>
+    </div>
+
+  </section>
+
+  <!-- ── Background Concepts ────────────────────────────────────── -->
+  <section id="background">
+    <h2>Background Concepts</h2>
+    <p>
+      This section explains the hardware ideas that appear throughout the rest of this
+      document. If you have designed hardware before, skip it.
+    </p>
+
+    <div class="concept">
+      <div class="concept-title">What a CPU core is — and what RV32IMC means</div>
+      <p>
+        A CPU core is a circuit that, over and over, does three things: fetch an
+        instruction from memory, decode what it means, and execute it. Hazard3 is a
+        <strong>3-stage pipeline</strong>: Fetch, Decode, and Execute each run in parallel
+        on different instructions. Every clock cycle, the pipeline advances — one
+        instruction is fetched, a different one is decoded, and a third is executed
+        simultaneously.
+      </p>
+      <p>
+        <strong>RISC-V</strong> is an open instruction set standard — it defines what
+        instructions a CPU understands and how they are encoded in binary. No company owns
+        it. Anyone can build a CPU that implements it.
+      </p>
+      <p>
+        The letters after RV32 describe which parts of the standard are implemented:
+      </p>
+      <ul>
+        <li><strong>RV</strong> — RISC-V</li>
+        <li><strong>32</strong> — registers and data are 32 bits wide</li>
+        <li><strong>I</strong> — base integer instructions: add, subtract, load, store, branch, jump</li>
+        <li><strong>M</strong> — multiply and divide instructions</li>
+        <li><strong>C</strong> — compressed instructions: common instructions encoded in 16 bits instead of 32, saving code size</li>
+      </ul>
+      <p style="margin-bottom:0">
+        Hazard3 also implements <strong>Zicsr</strong> — the control and status register
+        extension, which gives access to timer, interrupt, and exception registers.
+      </p>
+    </div>
+
+    <div class="concept">
+      <div class="concept-title">What a bus is</div>
+      <p>
+        Inside this SoC there are several independent pieces of hardware: the CPU, SRAM,
+        GPIO, and PIO. They all need to exchange data. A <strong>bus</strong> is the set of
+        shared wires and the rules (protocol) for using them — which signal means what,
+        who is allowed to drive the wires and when, and how a receiver signals that it is
+        ready.
+      </p>
+      <p>
+        Without a bus protocol, connecting multiple senders and receivers to the same wires
+        would cause <strong>bus contention</strong>: two things driving the same wire at the
+        same time, one pulling it high, one pulling it low — the result is undefined and can
+        damage real hardware.
+      </p>
+      <p style="margin-bottom:0">
+        The protocol enforces that only one sender drives the wires at a time. The
+        <strong>arbiter</strong> is the circuit that decides which sender gets access each
+        cycle when more than one is waiting.
+      </p>
+    </div>
+
+    <div class="concept">
+      <div class="concept-title">What AHB-Lite is</div>
+      <p>
+        AHB-Lite (Advanced High-performance Bus, Lite variant) is the specific bus protocol
+        used in this design. It was defined by ARM and is the same protocol Hazard3 exposes
+        natively on its CPU ports.
+      </p>
+      <p>A transaction on AHB-Lite happens in two consecutive clock cycles:</p>
+      <ul>
+        <li>
+          <strong>Address phase</strong> — the master (CPU) drives: <code>HADDR</code>
+          (the target address), <code>HWRITE</code> (1 = write, 0 = read),
+          <code>HSIZE</code> (byte / halfword / word), <code>HTRANS</code> (indicates
+          a valid transaction).
+        </li>
+        <li>
+          <strong>Data phase</strong> — one cycle later: if writing, the master drives
+          <code>HWDATA</code>; if reading, the slave drives <code>HRDATA</code> back.
+        </li>
+      </ul>
+      <p>
+        The slave asserts <code>HREADY</code> low to stall the bus if it needs more time.
+        The master must hold its signals stable until <code>HREADY</code> goes high.
+      </p>
+      <p>
+        Hazard3 has <strong>two separate AHB-Lite ports</strong>: one for instruction
+        fetches (I-port) and one for data loads and stores (D-port). They operate
+        independently and in parallel. This is why the SoC has two decoders — one for
+        each port.
+      </p>
+      <p style="margin-bottom:0">
+        A <strong>decoder</strong> looks at <code>HADDR</code> and routes the transaction
+        to the right slave. If the address is in <code>0x0000_xxxx</code>, the decoder
+        points to SRAM. If it is <code>0x4000_xxxx</code>, it points to GPIO. And so on.
+      </p>
+    </div>
+
+    <div class="concept">
+      <div class="concept-title">What memory-mapped I/O is</div>
+      <p>
+        The CPU has one operation it knows how to do with the outside world: read or write
+        to an address. It does not have a special "talk to GPIO" instruction or a special
+        "talk to PIO" instruction. Everything goes through the same load/store mechanism.
+      </p>
+      <p>
+        Memory-mapped I/O works by placing peripherals at specific addresses in the address
+        space. When the CPU writes to address <code>0x4000_0000</code>, the decoder routes
+        that transaction to the GPIO peripheral instead of SRAM. The GPIO peripheral sees
+        the write and updates the state of its output pins. From the CPU's perspective, it
+        just wrote to a memory address.
+      </p>
+      <p style="margin-bottom:0">
+        The firmware file <code>fw/soc.h</code> defines macros for every peripheral
+        register address. Writing firmware is a matter of knowing which address controls
+        which behavior.
+      </p>
+    </div>
+
+    <div class="concept">
+      <div class="concept-title">What PIO is</div>
+      <p>
+        PIO (Programmable I/O) is a subsystem in the RP2040 — and replicated here — that
+        gives you small programmable state machines for controlling GPIO pins. Each state
+        machine has its own program (up to 32 instructions), its own clock divider, TX and
+        RX FIFOs for exchanging data with the CPU, and direct write access to GPIO pins.
+      </p>
+      <p>
+        The reason PIO exists: generating precise timing on a pin from the CPU requires
+        the CPU to execute instructions in a tight loop with exact cycle counts. This blocks
+        the CPU from doing anything else and breaks if an interrupt fires at the wrong time.
+        PIO state machines run autonomously — once started, they produce or consume pin
+        signals on their own clock without CPU involvement.
+      </p>
+      <p style="margin-bottom:0">
+        This SoC has two PIO blocks, each with two state machines (four total). The PIO
+        instruction set has 9 instructions. It is documented in full in the
+        <a href="https://datasheets.raspberrypi.com/rp2040/rp2040-datasheet.pdf">RP2040 datasheet, Chapter 3</a>.
+      </p>
+    </div>
+
+    <div class="concept">
+      <div class="concept-title">What DMA is</div>
+      <p>
+        DMA (Direct Memory Access) is a hardware block that moves data between two places
+        — for example, from a peripheral's output FIFO into SRAM — without the CPU doing
+        the work. Without DMA, the CPU must read each value from the peripheral and write
+        it to memory one at a time, spending cycles that could otherwise run other code.
+      </p>
+      <p>
+        A DMA controller is itself a bus master: it can issue reads and writes onto the
+        bus independently of the CPU. The CPU sets up the transfer — source address,
+        destination address, number of items, item width — and then the DMA runs the
+        transfer autonomously, raising an interrupt when done.
+      </p>
+      <p style="margin-bottom:0">
+        For this SoC, DMA is particularly useful for feeding the PIO TX FIFOs from SRAM
+        without tying up the CPU in a copy loop, and for capturing PIO RX FIFO output
+        into a memory buffer. The DMA controller is not yet implemented; it is the next
+        major milestone. See <a href="#next">Next Work</a>.
+      </p>
+    </div>
+
+  </section>
+
+  <!-- ── Repository Layout ───────────────────────────────────────── -->
+  <section id="layout">
+    <h2>Repository Layout</h2>
+    <pre><code>rtl/
+  core/hazard3/          # Hazard3 CPU (git submodule)
+  soc/
+    rvsoc_top.sv         # SoC top — CPU, decoders, SRAM, GPIO, PIO0, PIO1
+    fabric/
+      ahb_decoder.sv     # 2-slave AHB address decoder
+      ahb_decoder_4s.sv  # 4-slave variant (data port)
+      ahb_arbiter.sv     # 2-master round-robin arbiter (see Known Issues)
+    memory/
+      sram_top.sv        # Dual-port SRAM controller (I+D ports)
+      sram_bank.sv       # Single SRAM bank (BRAM/LUTRAM target)
+    peripheral/
+      gpio.sv
+      pio/
+        pio_top.sv       # 2 state machines + shared instruction memory
+        pio_sm.sv        # State machine execute stage
+        pio_fifo.sv      # TX/RX FIFOs (LUTRAM-backed, FJOIN support)
+
+fpga/
+  kr260_top.sv           # Synthesis top — wires PS block design to SoC wrapper
+  fpga_top_kr260.sv      # SoC wrapper: reset sync, GPIO/PIO output mux
+  ps_bd_wrapper.sv       # Auto-generated stub (Vivado block design)
+  create_project_kr260.tcl  # Vivado project script (headless)
+  kr260.xdc              # Pin constraints (RPi header → rpi_gpio[7:0])
+  kr260.bif              # bootgen image descriptor
+
+fw/
+  crt0.S                 # Reset handler, stack setup, optional core-1 wake
+  link.ld                # Linker script: firmware at 0x0000_0000, stack top 0x3FF0
+  soc.h                  # All peripheral base addresses and register macros
+  blink.c                # GPIO software blink (confirmed on KR260)
+  multi_blink.c          # Ripple-counter multi-pin blink (confirmed on KR260)
+  pio_blink.c            # PIO timer → CPU toggles GPIO ~1 Hz (confirmed on KR260)
+  pio_pwm.c              # PIO autonomous PWM, CPU varies duty cycle (built, not yet loaded)
+  test_c_*.c             # Simulation test suite
+
+sim/
+  main.cpp               # Verilator harness — loads .bin, exits on sentinel write
+  sw/                    # Assembly + C firmware binaries for simulation
+  sw/waveform/           # Per-test VCD output
+
+scripts/
+  bin2mem.py             # .bin → $readmemh .mem (for SRAM init in bitstream)
+  bin2coe.py             # .bin → Xilinx .coe (alternative BRAM init format)</code></pre>
+  </section>
+
+  <!-- ── Address Map ─────────────────────────────────────────────── -->
+  <section id="addrmap">
+    <h2>Address Map</h2>
+    <p>
+      Every peripheral in the SoC is accessed by reading or writing to a specific range of
+      addresses (see <a href="#background">memory-mapped I/O</a> above). The decoder in
+      the fabric routes each CPU transaction to the right destination based on the top bits
+      of the address.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Range</th><th>Peripheral</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>0x0000_0000 – 0x0000_FFFF</code></td><td>SRAM (64 KB) — instructions and data both live here</td></tr>
+          <tr><td><code>0x4000_0000 – 0x4000_FFFF</code></td><td>GPIO — 32-bit output register at base address</td></tr>
+          <tr><td><code>0x5020_0000 – 0x5020_FFFF</code></td><td>PIO0 — state machines 0 and 1</td></tr>
+          <tr><td><code>0x5030_0000 – 0x5030_FFFF</code></td><td>PIO1 — state machines 2 and 3</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      The PIO register layout is identical to the RP2040 datasheet (Chapter 3). All macros
+      are in <code>fw/soc.h</code>. Any address not in the table above returns a bus error
+      — the decoder has no slave to forward it to.
+    </p>
+  </section>
+
+  <!-- ── ADRs ────────────────────────────────────────────────────── -->
+  <section id="adrs">
+    <h2>Architecture Decisions</h2>
+
+    <div class="adr">
+      <div class="adr-title">ADR-1 &mdash; CPU: Hazard3 over Ibex</div>
+      <div class="adr-label">Decision</div>
+      <p>Use Hazard3 as the CPU core.</p>
+      <div class="adr-label">Rationale</div>
+      <p>
+        When choosing a CPU core, the main candidates for a RISC-V RV32IMC design are
+        Ibex (developed by lowRISC) and Hazard3 (developed by Luke Wren at Raspberry Pi).
+      </p>
+      <p>
+        Ibex is designed to replace an ARM Cortex-M3 — a mid-range embedded core. It has
+        a 2-stage or 3-stage pipeline with branch prediction, a larger footprint, and more
+        configurability than needed here.
+      </p>
+      <p>
+        Hazard3 is designed to replace an ARM Cortex-M0+ — the smallest and lowest-power
+        ARM core. The RP2040 uses a Cortex-M0+; the RP2350 uses Hazard3 directly. This
+        makes Hazard3 the most direct architectural peer to what we are cloning. It is also
+        significantly smaller: Ibex typically costs ~30–40K LUTs on Xilinx FPGAs; Hazard3
+        fits in roughly half that.
+      </p>
+      <p style="margin-bottom:0">
+        Hazard3 exposes native AHB-Lite ports for both instruction and data access, which
+        removes the need for any bridge logic between the CPU and the rest of the SoC.
+      </p>
+    </div>
+
+    <div class="adr">
+      <div class="adr-title">ADR-2 &mdash; Bus fabric: AHB-Lite</div>
+      <div class="adr-label">Decision</div>
+      <p>Use AHB-Lite as the internal SoC bus.</p>
+      <div class="adr-label">Rationale</div>
+      <p>
+        Because Hazard3 already speaks AHB-Lite natively, using the same protocol for the
+        rest of the fabric means there is no translation layer between the CPU and any
+        peripheral. A bridge adds latency (extra cycles per transaction) and extra logic.
+        Avoiding it keeps every load/store at minimum latency.
+      </p>
+      <p>
+        AHB-Lite also has a well-defined, simple handshaking mechanism
+        (<code>HREADY</code>) for peripherals that need more than one cycle to respond.
+        The SRAM, GPIO, and PIO all implement this interface directly.
+      </p>
+      <p style="margin-bottom:0">
+        The "Lite" in AHB-Lite means there is no burst mode, no locked transfers, and no
+        exclusive access — only the features needed for a simple single-master
+        point-to-point transaction. Full AHB includes those features and is more complex
+        to implement and verify.
+      </p>
+    </div>
+
+    <div class="adr">
+      <div class="adr-title">ADR-3 &mdash; Single-core on working branch</div>
+      <div class="adr-label">Decision</div>
+      <p>
+        The active branch (<code>feat/single-core</code>) removes the arbiter and wires
+        CPU0 directly to the decoders. The second CPU core is disconnected.
+      </p>
+      <div class="adr-label">Rationale</div>
+      <p>
+        The RP2040 has two CPU cores that share a single bus to memory. When both cores
+        want to access the bus in the same cycle, an arbiter decides which one goes first.
+        The implementation of that arbiter on the <code>main</code> branch has a bug.
+      </p>
+      <p>
+        Rather than block all progress waiting for the arbiter fix, the arbiter was removed
+        on this branch so that all other work — PIO, GPIO, firmware, FPGA bringup — could
+        proceed with a known-good single-core SoC. The arbiter bug is described in detail
+        in <a href="#state">Known Issues</a>.
+      </p>
+      <p style="margin-bottom:0">
+        All simulation tests and all hardware tests on this branch use only CPU0. The
+        second core exists in the RTL but its AHB ports are left unconnected (tied to safe
+        idle values).
+      </p>
+    </div>
+
+    <div class="adr">
+      <div class="adr-title">ADR-4 &mdash; Firmware baked into bitstream</div>
+      <div class="adr-label">Decision</div>
+      <p>
+        Firmware is loaded into SRAM at synthesis time via <code>$readmemh</code> and a
+        <code>.mem</code> file, not over a runtime interface.
+      </p>
+      <div class="adr-label">Rationale</div>
+      <p>
+        When an FPGA powers on, BRAM contents are initially undefined — or whatever the
+        bitstream specifies. The CPU starts executing from address <code>0x0000_0000</code>
+        on the first clock cycle. If nothing put valid instructions there, the CPU fetches
+        garbage and executes it.
+      </p>
+      <p>
+        There is no operating system, no bootloader, no SD card — nothing to load firmware
+        at runtime. The only reliable way to get firmware into SRAM before the CPU's first
+        instruction is to encode the firmware into the bitstream itself. Vivado supports
+        this: the <code>$readmemh</code> directive in <code>sram_bank.sv</code> reads a hex
+        file at synthesis time and sets the initial contents of each BRAM block. The result
+        is baked into the bitstream.
+      </p>
+      <p>
+        The flow: compile firmware → <code>scripts/bin2mem.py</code> converts the binary
+        to a hex file → saved as <code>fpga/firmware.mem</code> → Vivado reads it during
+        synthesis → BRAM starts up pre-loaded. Loading a different firmware requires a
+        full re-synthesize.
+      </p>
+      <p style="margin-bottom:0">
+        A future improvement: wire an AXI-to-AHB bridge from the Zynq PS to the PL SRAM,
+        so the ARM cores in the PS can write firmware into SRAM directly at runtime,
+        without rebuilding the bitstream.
+      </p>
+    </div>
+
+    <div class="adr">
+      <div class="adr-title">ADR-5 &mdash; PIO GPIO mux in FPGA wrapper</div>
+      <div class="adr-label">Decision</div>
+      <p>
+        <code>fpga_top_kr260.sv</code> implements a per-bit output mux: if PIO has claimed
+        a pin (its output-enable bit is high), PIO drives it; otherwise the GPIO peripheral
+        drives it.
+      </p>
+      <div class="adr-label">Rationale</div>
+      <p>
+        Both the GPIO peripheral and PIO state machines can write to the same physical RPi
+        header pins. Without a mux, both would drive the same output wire simultaneously
+        — contention. The mux gives PIO priority: a state machine that calls
+        <code>SET PINDIRS</code> (sets its output-enable high) takes ownership of that
+        pin. The CPU can still control any pin not claimed by PIO through normal GPIO
+        writes.
+      </p>
+      <p style="margin-bottom:0">
+        The mux is per-bit, so PIO can own pins 0–3 while the CPU owns pins 4–7
+        simultaneously. This is the same model the RP2040 uses, except the RP2040 has
+        additional IO_BANK0 ownership control registers that are not implemented here yet.
+      </p>
+    </div>
+
+    <div class="adr">
+      <div class="adr-title">ADR-6 &mdash; Clock source: PS FCLK0, not a PL MMCM</div>
+      <div class="adr-label">Decision</div>
+      <p>
+        The SoC clock comes from <code>FCLK0</code>, a clock output from the Zynq PS
+        (the ARM processing system side of the chip), configured at 100 MHz in the Vivado
+        block design.
+      </p>
+      <div class="adr-label">Rationale</div>
+      <p>
+        The KR260 is a Zynq UltraScale+ MPSoC — it contains both an ARM processor (PS)
+        and a configurable FPGA fabric (PL) on the same die. The PS can output clocks
+        directly into the PL.
+      </p>
+      <p>
+        The first attempt used a PL MMCM (a clock synthesis circuit inside the FPGA)
+        driven by an oscillator expected on pin H4. That pin is not connected on the KR260
+        — it is present on a different board (KD240) that shares the same base schematic.
+        With no signal on H4, the MMCM had no reference and produced an unstable output.
+        This caused a USB over-current fault when the bitstream was loaded.
+      </p>
+      <p style="margin-bottom:0">
+        Switching to FCLK0 gives a known-good, PS-managed clock. The PS also holds the PL
+        in reset (<code>FCLK_RESET0_N</code>) until it has finished booting, so the SoC
+        never starts with an unstable clock.
+      </p>
+    </div>
+  </section>
+
+  <!-- ── Current State ───────────────────────────────────────────── -->
+  <section id="state">
+    <h2>Current State</h2>
+
+    <h3>FPGA — KR260 Synthesis Results</h3>
+    <p>
+      Synthesised and implemented with Vivado 2025.2, targeting 100 MHz.
+      Timing is clean: setup WNS = +1.231 ns, hold WHS = +0.028 ns. Zero failing
+      endpoints — every path in the design meets the 10 ns budget.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Resource</th><th>Used</th><th>Total</th><th>Utilisation</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>CLB LUTs</td><td>22,466</td><td>117,120</td>
+            <td>
+              <div class="util-bar-wrap">
+                <div class="util-bar"><div class="util-bar-fill" style="width:19.2%"></div></div>
+                <span class="util-pct">19.2%</span>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td>Registers</td><td>5,420</td><td>234,240</td>
+            <td>
+              <div class="util-bar-wrap">
+                <div class="util-bar"><div class="util-bar-fill" style="width:2.3%"></div></div>
+                <span class="util-pct">2.3%</span>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td>RAMB36</td><td>32</td><td>144</td>
+            <td>
+              <div class="util-bar-wrap">
+                <div class="util-bar"><div class="util-bar-fill" style="width:22.2%"></div></div>
+                <span class="util-pct">22.2%</span>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td>LUTRAM</td><td>360</td><td>57,600</td>
+            <td>
+              <div class="util-bar-wrap">
+                <div class="util-bar"><div class="util-bar-fill" style="width:0.6%"></div></div>
+                <span class="util-pct">0.6%</span>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>FPGA — KR260 Hardware Bringup</h3>
+    <p>
+      Board OS: Ubuntu Server 24.04 LTS. Clock: PS FCLK0 at 100 MHz (confirmed via
+      <code>/sys/kernel/debug/clk/pl0_ref/clk_rate</code>). Each test was verified by
+      probing the RPi header pins with a multimeter or oscilloscope.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Firmware</th><th>Result</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>gpio_on.S</code></td><td><span class="pass">PASS</span> &nbsp; LED on — CPU executing, GPIO write reaching RPi header</td></tr>
+          <tr><td><code>blink.c</code></td><td><span class="pass">PASS</span> &nbsp; Confirmed blinking on hardware</td></tr>
+          <tr><td><code>multi_blink.c</code></td><td><span class="pass">PASS</span> &nbsp; Confirmed ripple-counter pattern on hardware</td></tr>
+          <tr><td><code>pio_blink.c</code></td><td><span class="pass">PASS</span> &nbsp; Confirmed ~1 Hz blink via PIO timer</td></tr>
+          <tr><td><code>pio_pwm.c</code></td><td><span class="pending">PENDING</span> &nbsp; Built and simulated — not yet loaded to hardware</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Known Issues</h3>
+
+    <div class="issue">
+      <p><strong>Arbiter bug (<code>main</code> branch) — do not restore dual-core without fixing this</strong></p>
+      <p>
+        The arbiter in <code>rtl/soc/fabric/ahb_arbiter.sv</code> is supposed to grant bus
+        access to one master per cycle. If both CPU0 and CPU1 want the bus at the same
+        time, the arbiter should pick one, let it complete its transaction, then pick the
+        other.
+      </p>
+      <p>
+        The bug: the arbiter holds the grant signal high for <strong>two cycles</strong>
+        instead of one. Here is what that looks like:
+      </p>
+      <pre><code>Cycle 1: Grant → CPU0.  CPU0 drives HADDR, HWRITE, HTRANS.  Correct.
+Cycle 2: Grant still → CPU0 (bug).  But the arbiter has also started
+         transitioning toward CPU1, so HSEL for CPU1's decoder goes high.
+         CPU0 is still driving HWDATA for the previous transaction's data phase,
+         but CPU1's decoder now thinks a new CPU1 transaction is in the address phase.
+         CPU1 reads HADDR — which is actually CPU0's HWDATA — as its target address.
+         CPU1 issues a load or store to a garbage address.</code></pre>
+      <p>
+        The symptom is that CPU1 reads corrupted values — its loads return data from the
+        wrong address, or its stores go to the wrong location. The fix is to ensure the
+        grant changes exactly on the cycle boundary between address phase and data phase.
+        This requires tracking where in the two-phase transaction each master is and only
+        switching grants at the end of a complete transaction.
+      </p>
+      <p style="margin-bottom:0">
+        Tracked on <code>main</code>. <code>feat/single-core</code> works around it by
+        removing the arbiter entirely. Do not re-enable the second core without fixing and
+        verifying the arbiter in simulation first.
+      </p>
+    </div>
+
+    <div class="issue">
+      <p><strong>SRAM write-first semantics — do not change <code>sram_bank.sv</code> write assignment style</strong></p>
+      <p>
+        In <code>rtl/soc/memory/sram_bank.sv</code>, the write to BRAM data uses a
+        blocking assignment (<code>=</code>) instead of the non-blocking (<code>&lt;=</code>)
+        that is standard for registered logic. This is intentional and must not be changed.
+      </p>
+      <p>
+        Here is why. BRAM has two operating modes for what happens when you read and write
+        the same address in the same cycle:
+      </p>
+      <ul>
+        <li>
+          <strong>READ_FIRST</strong>: the read returns the old value (the value that was
+          there before this write). The write still happens, but the output reflects the
+          previous state.
+        </li>
+        <li>
+          <strong>WRITE_FIRST</strong>: the read returns the new value (the value being
+          written right now). The output immediately reflects the write.
+        </li>
+      </ul>
+      <p>
+        Vivado infers which mode to use based on the RTL. If the write is non-blocking
+        (<code>&lt;=</code>), Vivado sees a read-first pattern and infers READ_FIRST BRAM.
+        If the write is blocking (<code>=</code>), Vivado sees write-first behavior and
+        infers WRITE_FIRST BRAM.
+      </p>
+      <p>
+        This matters for the CPU because Hazard3 issues a store (<code>sw</code>) followed
+        immediately by a load (<code>lw</code>) to the same address in back-to-back cycles.
+        The pipeline is structured so the load's read happens while the store's write is
+        still being committed. Under READ_FIRST, the load gets the old value — a stale
+        read. The CPU appears to ignore its own store.
+      </p>
+      <p style="margin-bottom:0">
+        Under WRITE_FIRST, the load sees the new value immediately. This is correct. The
+        blocking <code>=</code> in <code>sram_bank.sv</code> is what makes Vivado infer
+        WRITE_FIRST. Leave it as-is.
+      </p>
+    </div>
+
+    <div class="issue">
+      <p><strong>PIO clkdiv width</strong></p>
+      <p>
+        The PIO clock divider in <code>pio_sm.sv</code> is 8 bits wide on FPGA, narrowed
+        from the 16-bit width in the RP2040 specification. This was done to avoid Vivado
+        inferring a wide counter that uses excessive LUTs.
+      </p>
+      <p style="margin-bottom:0">
+        The consequence: the maximum clock divisor is 255 instead of 65535. At 100 MHz
+        this limits the minimum PIO step rate to ~392 kHz. For the current firmware tests
+        this is not a problem. Restore to 16 bits before any ASIC work or before
+        implementing firmware that needs very slow PIO clocking.
+      </p>
+    </div>
+  </section>
+
+  <!-- ── Build & Deploy ──────────────────────────────────────────── -->
+  <section id="build">
+    <h2>Build &amp; Deploy</h2>
+
+    <h3>Run simulation (all tests)</h3>
+    <p>
+      Simulation uses Verilator to compile the RTL into a C++ model, then runs each
+      firmware binary through it. The harness (<code>sim/main.cpp</code>) exits when the
+      firmware writes a sentinel value to a specific address. Pass = firmware completes
+      without timeout.
+    </p>
+    <pre><code># On remote machine (faster build):
+make remote-test</code></pre>
+
+    <h3>Build and load a bitstream to KR260</h3>
+    <p>
+      Step 1 runs Vivado synthesis + implementation with the chosen firmware baked into
+      the BRAM initial values. This takes ~15–25 minutes. Step 2 converts the raw Xilinx
+      <code>.bit</code> file into a <code>.bit.bin</code> that the Linux FPGA manager
+      can load. Step 3 copies it to the board and loads it — from this point the PL is
+      the SoC and the firmware starts running immediately.
+    </p>
+    <pre><code># 1. Synthesise + implement; bake firmware into bitstream
+make remote-fpga-kr260 FW=sim/sw/pio_blink.bin
+
+# 2. Convert .bit → .bit.bin (bootgen, runs on the remote machine)
+make remote-bitstream-kr260
+
+# 3. Copy to board and load
+scp fpga/bitstream/fpga_top.bit.bin ubuntu@&lt;board-ip&gt;:/lib/firmware/
+ssh ubuntu@&lt;board-ip&gt; 'sudo fpgautil -b ~/fpga_top.bit.bin -f Full'</code></pre>
+
+    <h3>Firmware compilation</h3>
+    <p>
+      C firmware in <code>fw/</code> is compiled with a RISC-V cross-compiler:
+      <code>riscv64-none-elf-gcc</code>. The flags <code>-march=rv32imc_zicsr -mabi=ilp32</code>
+      tell the compiler to target RV32IMC with 32-bit integer calling convention. The
+      linker script <code>fw/link.ld</code> places the firmware at address
+      <code>0x0000_0000</code> — the start of SRAM, which is where the CPU fetches its
+      first instruction.
+    </p>
+    <pre><code>make sim/sw/blink.bin</code></pre>
+    <p>
+      The resulting <code>.bin</code> is a flat binary image, not an ELF. It is loaded
+      directly at address 0 in simulation, or converted to a <code>.mem</code> hex file
+      for bitstream baking.
+    </p>
+  </section>
+
+  <!-- ── Next Work ───────────────────────────────────────────────── -->
+  <section id="next">
+    <h2>Next Work</h2>
+
+    <div class="next-item">
+      <p><strong>DMA controller</strong></p>
+      <p style="margin-bottom:0">
+        No design started. A DMA (Direct Memory Access) controller moves data between
+        peripherals and memory without CPU involvement — the CPU sets up a transfer
+        (source address, destination address, length) and the DMA block executes it
+        autonomously. It should attach to the AHB data fabric as a new slave (for its
+        control registers) and also as a bus master (so it can issue its own reads and
+        writes). Suggested control register base address: <code>0x5000_0000</code>. Adding
+        a second bus master means the arbiter must be fixed first.
+      </p>
+    </div>
+
+    <div class="next-item">
+      <p><strong>pio_pwm.c hardware test</strong></p>
+      <p style="margin-bottom:0">
+        Build a bitstream with <code>fw/pio_pwm.c</code> baked in and load it to the
+        KR260. Expected result: a breathing LED pattern on one of the RPi header GPIO
+        pins as the CPU varies the PIO duty cycle over time.
+      </p>
+    </div>
+
+    <div class="next-item">
+      <p><strong>Arbiter fix</strong></p>
+      <p style="margin-bottom:0">
+        Diagnose the two-cycle grant hold in <code>rtl/soc/fabric/ahb_arbiter.sv</code>.
+        The fix should track the AHB transaction phase (address vs data) and only switch
+        the grant between transactions, not between cycles. Verify in simulation with a
+        dual-core test that has both CPUs issuing overlapping loads and stores before
+        merging to <code>main</code>.
+      </p>
+    </div>
+
+    <div class="next-item">
+      <p><strong>AXI-to-AHB bridge (runtime firmware loading)</strong></p>
+      <p style="margin-bottom:0">
+        Connect the Zynq PS to the PL SRAM via an AXI-to-AHB bridge. This would let the
+        ARM cores write firmware directly into SRAM from Linux (e.g. <code>devmem2</code>
+        or a small loader program), removing the need to re-synthesize for every firmware
+        change. The PS would hold the SoC in reset while loading, then release reset to
+        start execution.
+      </p>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

@@ -83,12 +83,11 @@ wire [11:0] reg_addr = haddr_r[11:0]; // offset within 4KB block
 // ============================================================================
 // Instruction memory (32 x 16-bit, shared by all 4 SMs)
 // ============================================================================
-reg [15:0] instr_mem [0:31];
+reg [511:0] instr_mem;
+integer i; // loop variable (module-scope for Yosys)
 
-integer mi;
 initial begin
-    for (mi = 0; mi < 32; mi = mi + 1)
-        instr_mem[mi] = 16'd0;
+    instr_mem = 512'd0;
 end
 
 // ============================================================================
@@ -394,7 +393,11 @@ always @(*) begin
         // INSTR_MEM[0..31] at 0x048..0x0C4
         default: begin
             if (reg_addr >= 12'h048 && reg_addr <= 12'h0C4) begin
-                hrdata_r = {16'd0, instr_mem[5'((reg_addr - 12'h048) >> 2)]};
+                begin
+                    reg [4:0] imem_idx;
+                    imem_idx = (reg_addr - 12'h048) >> 2;
+                    hrdata_r = {16'd0, instr_mem[imem_idx * 16 +: 16]};
+                end
             end else begin
                 // Per-SM registers
                 // SM0: 0x0C8, SM1: 0x0E0, SM2: 0x0F8, SM3: 0x110
@@ -410,7 +413,7 @@ end
 
 // SM register read helper function
 function automatic [31:0] sm_reg_read;
-    input integer sm;
+    input [1:0] sm;
     input [11:0]  offset;
     case (offset)
         12'h00: sm_reg_read = sm_clkdiv[sm];
@@ -450,7 +453,6 @@ end
 // Write logic (sequential, registered)
 // ============================================================================
 always @(posedge clk or negedge rst_n) begin
-    integer i;
     if (!rst_n) begin
         sm_enable_r          <= 4'd0;
         sm_restart_pulse     <= 4'd0;
@@ -472,8 +474,7 @@ always @(posedge clk or negedge rst_n) begin
             tx_wdata_r[i]   <= 32'd0;
         end
 
-        for (i = 0; i < 32; i = i + 1)
-            instr_mem[i] <= 16'd0;
+        instr_mem <= 512'd0;
 
     end else begin
         // Clear one-shot pulses each cycle
@@ -548,7 +549,11 @@ always @(posedge clk or negedge rst_n) begin
                 // -------------------------------------------------------
                 default: begin
                     if (reg_addr >= 12'h048 && reg_addr <= 12'h0C4) begin
-                        instr_mem[5'((reg_addr - 12'h048) >> 2)] <= hwdata[15:0];
+                        begin
+                            reg [4:0] wr_idx;
+                            wr_idx = (reg_addr - 12'h048) >> 2;
+                            instr_mem[wr_idx * 16 +: 16] <= hwdata[15:0];
+                        end
                     end else begin
                         // Per-SM registers
                         // SM0

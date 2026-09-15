@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RTL to Tapeout — rp2040-clone</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1a1d27;
+      --border:   #2a2d3a;
+      --accent:   #5b8dee;
+      --warn:     #e0a030;
+      --ok:       #3db87a;
+      --text:     #d4d8e8;
+      --muted:    #7a7f99;
+      --code-bg:  #131620;
+      --mono:     "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+      --sans:     -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 15px;
+      line-height: 1.7;
+      padding: 2rem 1rem 4rem;
+    }
+
+    .page {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    /* ── Header ── */
+    header {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 1.5rem;
+      margin-bottom: 2.5rem;
+    }
+    header h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: #fff;
+    }
+    header .subtitle {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin-top: 0.3rem;
+    }
+
+    /* ── Nav ── */
+    nav {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 2.5rem;
+    }
+    nav p {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 0.6rem;
+    }
+    nav ol {
+      padding-left: 1.2rem;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.2rem 2rem;
+    }
+    nav a {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.9rem;
+    }
+    nav a:hover { text-decoration: underline; }
+
+    /* ── Section headings ── */
+    h2 {
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: #fff;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.4rem;
+      margin: 2.5rem 0 1rem;
+    }
+    h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--accent);
+      margin: 1.5rem 0 0.5rem;
+    }
+
+    /* ── Paragraphs ── */
+    p { margin-bottom: 0.9rem; }
+
+    /* ── Inline code ── */
+    code {
+      font-family: var(--mono);
+      font-size: 0.82em;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 0.1em 0.35em;
+      color: #c9d1f5;
+    }
+
+    /* ── Code blocks ── */
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem 1.25rem;
+      overflow-x: auto;
+      margin: 0.75rem 0 1.25rem;
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      line-height: 1.6;
+      color: #c9d1f5;
+    }
+    pre code {
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: inherit;
+    }
+
+    /* ── Lists ── */
+    ul, ol { padding-left: 1.4rem; margin-bottom: 0.9rem; }
+    li { margin-bottom: 0.3rem; }
+    ol li { margin-bottom: 0.5rem; }
+
+    /* ── Stage cards ── */
+    .stage {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: 6px;
+      padding: 1.1rem 1.35rem;
+      margin-bottom: 1.5rem;
+    }
+    .stage-header {
+      display: flex;
+      align-items: baseline;
+      gap: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+    .stage-number {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--accent);
+      white-space: nowrap;
+    }
+    .stage-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #fff;
+    }
+    .stage-tool {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-left: auto;
+      white-space: nowrap;
+    }
+    .stage-label {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--muted);
+      margin-top: 0.9rem;
+      margin-bottom: 0.3rem;
+    }
+
+    /* ── Warning boxes (what can go wrong) ── */
+    .pitfall {
+      background: rgba(224,160,48,0.07);
+      border: 1px solid rgba(224,160,48,0.22);
+      border-left: 3px solid var(--warn);
+      border-radius: 5px;
+      padding: 0.75rem 1rem;
+      margin-top: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .pitfall-title {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: var(--warn);
+      margin-bottom: 0.25rem;
+    }
+    .pitfall p { margin-bottom: 0; font-size: 0.9rem; }
+
+    /* ── Checklist ── */
+    .checklist {
+      list-style: none;
+      padding-left: 0;
+      margin-bottom: 0;
+    }
+    .checklist li {
+      display: flex;
+      gap: 0.75rem;
+      padding: 0.6rem 0;
+      border-bottom: 1px solid var(--border);
+      align-items: flex-start;
+    }
+    .checklist li:last-child { border-bottom: none; }
+    .check-num {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: var(--warn);
+      min-width: 1.5rem;
+      padding-top: 0.1rem;
+    }
+
+    /* ── Flow diagram box ── */
+    .flow-wrap {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1.25rem 1.5rem;
+      margin: 0.75rem 0 1.5rem;
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      line-height: 1.8;
+      color: #c9d1f5;
+      overflow-x: auto;
+    }
+    .flow-stage   { color: #fff; font-weight: 600; }
+    .flow-tool    { color: var(--muted); }
+    .flow-output  { color: var(--ok); }
+    .flow-arrow   { color: var(--border); }
+
+    /* ── Misc ── */
+    strong { color: #e0e4f8; }
+    a { color: var(--accent); }
+    a:hover { text-decoration: underline; }
+
+    @media (max-width: 600px) {
+      nav ol { grid-template-columns: 1fr; }
+      .stage-tool { display: none; }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <h1>RTL to Tapeout</h1>
+    <p class="subtitle">rp2040-clone &nbsp;·&nbsp; target process: sky130 (SkyWater 130 nm) &nbsp;·&nbsp; 2026-08-26</p>
+  </header>
+
+  <nav>
+    <p>Contents</p>
+    <ol>
+      <li><a href="#intro">Introduction</a></li>
+      <li><a href="#overview">Flow Overview</a></li>
+      <li><a href="#s1">Stage 1 — sv2v</a></li>
+      <li><a href="#s2">Stage 2 — FPGA Primitive Replacement</a></li>
+      <li><a href="#s3">Stage 3 — Synthesis</a></li>
+      <li><a href="#s4">Stage 4 — Floorplanning</a></li>
+      <li><a href="#s5">Stage 5 — Placement</a></li>
+      <li><a href="#s6">Stage 6 — Clock Tree Synthesis</a></li>
+      <li><a href="#s7">Stage 7 — Routing</a></li>
+      <li><a href="#s8">Stage 8 — Sign-off</a></li>
+      <li><a href="#s9">Stage 9 — GDS Export</a></li>
+      <li><a href="#s10">Stage 10 — Submission</a></li>
+      <li><a href="#todo">What Still Needs Doing</a></li>
+    </ol>
+  </nav>
+
+  <!-- ── Introduction ───────────────────────────────────────────── -->
+  <section id="intro">
+    <h2>Introduction</h2>
+    <p>
+      This document explains the process of taking the RTL in this repository and turning
+      it into a real silicon chip. It covers every stage in order, what each stage
+      produces, what tools are used, and what can go wrong.
+    </p>
+    <p>
+      The target process is <strong>SkyWater sky130</strong> — a 130 nm open-source
+      process developed by SkyWater Technology and made accessible through the
+      Efabless / Google MPW program. 130 nm means the smallest feature that can be
+      reliably manufactured on the chip is 130 nanometres wide. It is not a bleeding-edge
+      node, but it is open, well-documented, and free to use for tapeout.
+    </p>
+    <p>
+      The toolchain that automates the majority of this flow is
+      <strong>OpenLane</strong> — an open-source RTL-to-GDS pipeline that wraps Yosys,
+      OpenROAD, Magic, Netgen, and several other tools into a single run driven by a
+      JSON config file. Most stages below happen inside OpenLane automatically; they are
+      described individually so you understand what is happening and can intervene when
+      something fails.
+    </p>
+  </section>
+
+  <!-- ── Flow Overview ──────────────────────────────────────────── -->
+  <section id="overview">
+    <h2>Flow Overview</h2>
+    <div class="flow-wrap">
+<span class="flow-stage">RTL (SystemVerilog .sv files)</span>
+   │
+   ▼
+<span class="flow-stage">sv2v</span>                    <span class="flow-tool">— convert SystemVerilog → plain Verilog</span>
+   │
+   ▼
+<span class="flow-stage">FPGA primitive replacement</span>  <span class="flow-tool">— swap BRAM/LUTRAM for ASIC equivalents</span>
+   │
+   ▼
+<span class="flow-stage">Synthesis</span>               <span class="flow-tool">— Yosys maps RTL to sky130 standard cells</span>
+   │  <span class="flow-output">output: gate-level netlist (.v)</span>
+   ▼
+<span class="flow-stage">Floorplanning</span>           <span class="flow-tool">— OpenROAD: die size, I/O pads, power grid</span>
+   │  <span class="flow-output">output: floorplan (.def)</span>
+   ▼
+<span class="flow-stage">Placement</span>               <span class="flow-tool">— OpenROAD: position every standard cell</span>
+   │  <span class="flow-output">output: placed netlist (.def)</span>
+   ▼
+<span class="flow-stage">Clock Tree Synthesis</span>    <span class="flow-tool">— OpenROAD: balanced clock distribution</span>
+   │  <span class="flow-output">output: placed + clocked netlist</span>
+   ▼
+<span class="flow-stage">Routing</span>                 <span class="flow-tool">— OpenROAD: connect cells with metal wires</span>
+   │  <span class="flow-output">output: routed layout (.def)</span>
+   ▼
+<span class="flow-stage">Sign-off</span>
+   ├── <span class="flow-stage">STA</span>  <span class="flow-tool">— every path meets the clock period</span>
+   ├── <span class="flow-stage">DRC</span>  <span class="flow-tool">— all geometries follow foundry rules</span>
+   └── <span class="flow-stage">LVS</span>  <span class="flow-tool">— layout matches the netlist electrically</span>
+   │
+   ▼
+<span class="flow-stage">GDS export</span>              <span class="flow-tool">— Magic produces the final GDSII layout file</span>
+   │
+   ▼
+<span class="flow-stage">Tapeout submission</span>      <span class="flow-tool">— Efabless / Google MPW</span>
+    </div>
+  </section>
+
+  <!-- ── Stage 1 ────────────────────────────────────────────────── -->
+  <section id="s1">
+    <h2>Stage 1 — Convert SystemVerilog to Verilog</h2>
+    <div class="stage">
+      <div class="stage-header">
+        <span class="stage-number">Stage 1</span>
+        <span class="stage-title">sv2v</span>
+        <span class="stage-tool">tool: sv2v</span>
+      </div>
+      <p>
+        The RTL in this repo is written in <strong>SystemVerilog</strong> (<code>.sv</code>
+        files). SystemVerilog is a superset of Verilog with convenient additions:
+        <code>logic</code> types, <code>always_ff</code>, <code>always_comb</code>,
+        packed structs, and more. Vivado (the FPGA tool) handles SystemVerilog natively.
+      </p>
+      <p>
+        Most open-source ASIC tools — Yosys in particular — have limited SystemVerilog
+        support. The first step is to mechanically convert everything to plain Verilog
+        using <strong>sv2v</strong>.
+      </p>
+      <pre><code>sv2v rtl/soc/*.sv rtl/soc/**/*.sv -w separated</code></pre>
+
+      <div class="stage-label">What can go wrong</div>
+
+      <div class="pitfall">
+        <div class="pitfall-title">Unpacked array ports</div>
+        <p>
+          SystemVerilog allows <code>input logic [7:0] data [3:0]</code> — an array of
+          four 8-bit values as a port. Plain Verilog does not support unpacked arrays on
+          ports. These must be flattened to <code>input logic [31:0] data</code> before
+          sv2v runs. This has already bitten this design once during OpenLane work.
+        </p>
+      </div>
+      <div class="pitfall">
+        <div class="pitfall-title"><code>automatic</code> in always blocks</div>
+        <p>
+          SystemVerilog tasks inside <code>always</code> blocks can be declared
+          <code>automatic</code>, meaning local variables are re-created on each call.
+          Verilog does not support this in synthesizable code. Remove
+          <code>automatic</code> or restructure the logic.
+        </p>
+      </div>
+      <div class="pitfall">
+        <div class="pitfall-title"><code>$readmemh</code> FPGA init must be removed</div>
+        <p>
+          The SRAM in <code>sram_bank.sv</code> uses <code>$readmemh</code> to load
+          firmware at synthesis time — this is an FPGA-only trick. For ASIC, memory is a
+          separate hard macro and <code>$readmemh</code> must be removed from the RTL
+          before synthesis.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Stage 2 ────────────────────────────────────────────────── -->
+  <section id="s2">
+    <h2>Stage 2 — Replace FPGA Primitives with ASIC Equivalents</h2>
+    <div class="stage">
+      <div class="stage-header">
+        <span class="stage-number">Stage 2</span>
+        <span class="stage-title">FPGA Primitive Replacement</span>
+        <span class="stage-tool">tool: OpenRAM + manual RTL edits</span>
+      </div>
+      <p>
+        FPGA synthesis targets specific hardware blocks that are hard-wired into the FPGA
+        fabric. None of these exist in a standard cell ASIC library. They must be replaced
+        before synthesis can proceed.
+      </p>
+
+      <h3>BRAM &rarr; OpenRAM SRAM macro</h3>
+      <p>
+        On FPGA, the 64 KB SRAM uses <code>RAMB36</code> blocks — dedicated memory
+        primitives. In a sky130 ASIC there are no RAMB36 blocks. Memory is instead
+        provided as a <strong>hard macro</strong> generated by <strong>OpenRAM</strong>
+        — an open-source tool that generates SRAM layouts directly in the target process.
+      </p>
+      <p>
+        An OpenRAM macro is a pre-characterized black box: its timing (read latency,
+        setup/hold), power consumption, and physical dimensions are all known before
+        placement. It has a standard port interface that plugs into the existing
+        <code>sram_top.sv</code> controller with minimal changes.
+      </p>
+      <p>Steps:</p>
+      <ol>
+        <li>Determine the SRAM configuration: 32-bit wide, 16384 words deep (= 64 KB), dual-port (one for instruction fetch, one for data), 1-cycle read latency.</li>
+        <li>Run OpenRAM with the sky130 PDK to generate the macro. Output: RTL stub (<code>.v</code>), timing model (<code>.lib</code>), and physical dimensions (<code>.lef</code>).</li>
+        <li>Replace the BRAM inference logic in <code>sram_bank.sv</code> with an instantiation of the generated macro.</li>
+        <li>Provide the <code>.lib</code> and <code>.lef</code> to OpenLane so the placer and router treat the macro correctly.</li>
+      </ol>
+
+      <h3>LUTRAM &rarr; register arrays or small SRAM macros</h3>
+      <p>
+        The PIO FIFOs in <code>pio_fifo.sv</code> use LUTRAM — distributed memory built
+        from LUTs in the FPGA fabric. This does not exist in ASIC. Options:
+      </p>
+      <ul>
+        <li><strong>Register array</strong> — for shallow FIFOs (≤ 64 entries): synthesize from plain flip-flops. Simple and correct, but area-inefficient at larger depths.</li>
+        <li><strong>Small OpenRAM macro</strong> — for deeper FIFOs: generate a small SRAM macro (e.g. 32-bit × 32 entries) from OpenRAM and instantiate it.</li>
+      </ul>
+      <p>
+        The current PIO FIFOs are 4 entries deep (32-bit each). Register arrays are the
+        right choice here — generating a macro for 4 entries is not worth the overhead.
+      </p>
+    </div>
+  </section>
+
+  <!-- ── Stage 3 ────────────────────────────────────────────────── -->
+  <section id="s3">
+    <h2>Stage 3 — Synthesis</h2>
+    <div class="stage">
+      <div class="stage-header">
+        <span class="stage-number">Stage 3</span>
+        <span class="stage-title">Synthesis</span>
+        <span class="stage-tool">tool: Yosys</span>
+      </div>
+      <p>
+        <strong>Yosys</strong> reads the Verilog netlist from Stage 1 and maps it to the
+        <strong>sky130 standard cell library</strong> — a collection of hundreds of
+        pre-characterized logic gates, flip-flops, multiplexers, and buffers that
+        SkyWater has physically designed and verified in 130 nm silicon. Every cell has a
+        known delay, power, and area.
+      </p>
+      <p>Synthesis runs in three phases:</p>
+      <ol>
+        <li><strong>Elaboration</strong> — parse the Verilog and build an internal graph of logic operations.</li>
+        <li><strong>Optimization</strong> — simplify logic: remove constants, merge redundant gates, eliminate dead code.</li>
+        <li><strong>Technology mapping</strong> — replace abstract logic operations with actual cells from the sky130 library. For example: a 2-input AND becomes <code>sky130_fd_sc_hd__and2_1</code>; a positive-edge flip-flop becomes <code>sky130_fd_sc_hd__dfxtp_1</code>.</li>
+      </ol>
+      <p>
+        The output is a <strong>gate-level netlist</strong> — a Verilog file containing
+        only cell instantiations and wire connections, no behavioral logic.
+      </p>
+
+      <div class="stage-label">Key synthesis settings</div>
+      <ul>
+        <li><strong>Cell library variant</strong>: sky130 has variants — <code>hd</code> (high-density, smaller cells), <code>hs</code> (high-speed, lower delay), etc. OpenLane defaults to <code>hd</code>. Higher drive strength = lower delay, larger area.</li>
+        <li><strong>Target clock period</strong>: set the intended frequency so Yosys can prioritize timing-critical paths. Start conservative — 50 MHz (20 ns period) for a first pass, tighten later.</li>
+        <li><strong>Flattening</strong>: Yosys can collapse all module hierarchy into one flat netlist, which sometimes helps timing across module boundaries. OpenLane has a flag for this.</li>
+      </ul>
+
+      <div class="stage-label">What can go wrong</div>
+      <div class="pitfall">
+        <div class="pitfall-title">Unmapped cells</div>
+        <p>If sv2v missed a construct or the RTL uses something Yosys does not recognize, synthesis fails with an unmapped cell error. Fix the RTL and re-run.</p>
+      </div>
+      <div class="pitfall">
+        <div class="pitfall-title">Combinatorial loops</div>
+        <p>Logic that feeds its own output back into its input with no register in the path. Yosys errors on this. The loop must be broken by inserting a register stage.</p>
+      </div>
+      <div class="pitfall">
+        <div class="pitfall-title">Unintentional latches</div>
+        <p>
+          An <code>if</code> or <code>case</code> statement in a combinatorial block that
+          does not cover all cases causes Yosys to infer a latch — a storage element that
+          is not edge-triggered. Latches are problematic for ASIC timing analysis and
+          usually indicate a bug. Fix by adding a default assignment at the top of the
+          block or covering all cases explicitly.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Stage 4 ────────────────────────────────────────────────── -->
+  <section id="s4">
+    <h2>Stage 4 — Floorplanning</h2>
+    <div class="stage">
+      <div class="stage-header">
+        <span class="stage-number">Stage 4</span>
+        <span class="stage-title">Floorplanning</span>
+        <span class="stage-tool">tool: OpenROAD</span>
+      </div>
+      <p>
+        The floorplan defines the physical space the chip occupies and where the major
+        pieces go within it.
+      </p>
+
+      <h3>Die size</h3>
+      <p>
+        OpenLane estimates the total cell area from the synthesized netlist. The die must
+        be large enough to hold all the cells plus room for routing channels between them.
+        A <strong>utilization of 40–60%</strong> is typical — at 50% utilization, if the
+        cells occupy 1 mm², the die is 2 mm². Too tight and the router cannot fit all
+        the wires; too loose and the die is unnecessarily large and expensive.
+      </p>
+
+      <h3>I/O pad placement</h3>
+      <p>
+        Signals that connect to the outside world — clock, reset, GPIO, power — need
+        <strong>I/O pad cells</strong> placed around the perimeter of the die.
+        sky130 provides these from the <code>sky130_fd_io</code> library. Each pad is
+        large — roughly 60 µm wide — and the number of pads is limited by the perimeter
+        length. This constrains how many external signals the chip can have.
+      </p>
+
+      <h3>Power planning</h3>
+      <p>Power must be distributed across the entire die:</p>
+      <ul>
+        <li><strong>Power ring</strong> — a wide loop of metal running around the perimeter of the die, connected to the VDD and GND supply pads.</li>
+        <li><strong>Power straps</strong> — wide horizontal and vertical metal wires branching off the ring, crossing the die to deliver power to every region.</li>
+        <li><strong>Cell rows</strong> — each row of standard cells has built-in VDD and GND rails that the straps connect to.</li>
+      </ul>
+      <p>
+        sky130 has 5 metal layers. <strong>met1</strong> is used for cell-level
+        connections and the power rails inside rows. <strong>met2</strong> and
+        <strong>met3</strong> carry signals. <strong>met4</strong> and <strong>met5</strong>
+        carry power straps and the clock trunk.
+      </p>
+      <p>
+        Hard macros (the SRAM from Stage 2) are placed in the floorplan step, before
+        standard cells. Their position is usually chosen manually — placed in a corner or
+        along an edge to avoid blocking standard cell rows.
+      </p>
+
+      <div class="stage-label">What can go wrong</div>
+      <div class="pitfall">
+        <div class="pitfall-title">Die too small for I/O pads</div>
+        <p>If the perimeter of the chosen die size is shorter than the total width of all required I/O pads, the floorplan fails. Fix: increase die size, reduce pin count, or multiplex signals onto shared pads.</p>
+      </div>
+      <div class="pitfall">
+        <div class="pitfall-title">IR drop in power grid</div>
+        <p>
+          Metal wires have resistance. If power straps are too narrow or too sparse,
+          regions far from the supply pads see a lower effective voltage due to the
+          resistive drop. Lower voltage = slower logic = timing failures. IR drop is
+          checked in sign-off (Stage 8). Fix during floorplan by widening straps or
+          adding more of them.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Stage 5 ────────────────────────────────────────────────── -->
+  <section id="s5">
+    <h2>Stage 5 — Placement</h2>
+    <div class="stage">
+      <div class="stage-header">
+        <span class="stage-number">Stage 5</span>
+        <span class="stage-title">Placement</span>
+        <span class="stage-tool">tool: OpenROAD</span>
+      </div>
+      <p>
+        The placer positions every standard cell from the gate-level netlist inside the
+        die, within the rows defined by the floorplan. The primary objective is to minimize
+        total estimated wire length — cells connected to each other should be physically
+        close so wires between them are short, reducing delay and routing pressure.
+      </p>
+      <p>Placement runs in two phases:</p>
+      <ol>
+        <li><strong>Global placement</strong> — roughly positions cells to minimize estimated wirelength, without requiring cells to be on legal row-aligned positions.</li>
+        <li><strong>Detailed placement</strong> — snaps every cell to a legal position: aligned to the row grid, no overlaps with other cells or macros.</li>
+      </ol>
+
+      <div class="stage-label">What can go wrong</div>
+      <div class="pitfall">
+        <div class="pitfall-title">Routing congestion</div>
+        <p>
+          If a small region of the die has too many signals passing through it, the router
+          cannot fit all the wires there. The placer produces a congestion heat map —
+          dark areas need to be resolved by reducing cell density (larger die or lower
+          utilization) or restructuring the logic to reduce interconnect between modules.
+        </p>
+      </div>
+      <div class="pitfall">
+        <div class="pitfall-title">Macro placement blocks cell rows</div>
+        <p>
+          Large SRAM macros placed in the wrong position can cut off standard cell rows
+          or create regions the router cannot reach. Macro placement usually requires
+          manual iteration — try different corner/edge positions and check congestion.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Stage 6 ────────────────────────────────────────────────── -->
+  <section id="s6">
+    <h2>Stage 6 — Clock Tree Synthesis</h2>
+    <div class="stage">
+      <div class="stage-header">
+        <span class="stage-number">Stage 6</span>
+        <span class="stage-title">Clock Tree Synthesis (CTS)</span>
+        <span class="stage-tool">tool: OpenROAD</span>
+      </div>
+      <p>
+        The clock signal must arrive at every flip-flop at nearly the same time. If it
+        arrives at flip-flop A 500 ps before flip-flop B, and A feeds B, then A's output
+        must travel the full path from A to B in one clock period <em>minus</em> that
+        500 ps. The skew directly eats into timing budget.
+      </p>
+      <p>
+        CTS builds a <strong>clock tree</strong> — a balanced binary tree of buffers
+        that distributes the clock from its single source to every leaf flip-flop,
+        matching the propagation delay to each leaf as closely as possible.
+      </p>
+      <p>Key metrics after CTS:</p>
+      <ul>
+        <li><strong>Clock skew</strong> — the difference in arrival time between the earliest and latest leaf. Target under 100 ps for a 50 MHz design (the clock period is 20 ns; 100 ps is 0.5% of that).</li>
+        <li><strong>Insertion delay</strong> — the total time from clock source to leaves, added by the buffer tree. Typical: 1–3 ns. This shows up as a constant offset in timing reports but does not affect slack.</li>
+      </ul>
+      <p>
+        sky130 CTS uses dedicated clock buffer cells
+        (<code>sky130_fd_sc_hd__clkbuf_*</code>) that are characterized specifically for
+        clock distribution — better drive strength and lower skew than general buffers.
+      </p>
+    </div>
+  </section>
+
+  <!-- ── Stage 7 ────────────────────────────────────────────────── -->
+  <section id="s7">
+    <h2>Stage 7 — Routing</h2>
+    <div class="stage">
+      <div class="stage-header">
+        <span class="stage-number">Stage 7</span>
+        <span class="stage-title">Routing</span>
+        <span class="stage-tool">tool: OpenROAD (TritonRoute)</span>
+      </div>
+      <p>
+        The router connects every cell port to every other port it is supposed to be
+        connected to, using the available metal layers (met1–met5 in sky130). It works
+        in two phases:
+      </p>
+      <ol>
+        <li><strong>Global routing</strong> — divides the die into a coarse grid and assigns each net to routing channels, identifying which regions of the die each wire passes through.</li>
+        <li><strong>Detailed routing</strong> — assigns exact wire tracks and via positions within each channel, following the global routes while satisfying all design rules.</li>
+      </ol>
+      <p>
+        <strong>Vias</strong> connect wires on different metal layers. Each via takes
+        area and adds resistance. The router minimizes via count alongside wire length.
+      </p>
+      <p>
+        <strong>Design rules</strong> are the foundry's geometric constraints: minimum
+        wire width, minimum spacing between adjacent wires on the same layer, minimum via
+        size, minimum metal enclosure around a via. sky130 has hundreds of these rules.
+        The router must satisfy all of them — DRC (Stage 8) verifies this afterwards.
+      </p>
+
+      <div class="stage-label">What can go wrong</div>
+      <div class="pitfall">
+        <div class="pitfall-title">Failed routes (unrouted nets)</div>
+        <p>
+          If the router cannot fit all wires, some nets are left unrouted. This is a hard
+          failure — the design is not complete. Fix by reducing cell density (larger die),
+          reducing the number of signals crossing congested regions, or adjusting macro
+          placement to open routing channels.
+        </p>
+      </div>
+      <div class="pitfall">
+        <div class="pitfall-title">Long wires with high resistance</div>
+        <p>
+          Long wires on thin metal layers have significant resistance, which adds delay
+          and may cause timing failures in STA. The router can insert <strong>repeater
+          buffers</strong> along long routes to restore signal strength. OpenROAD does
+          this automatically for critical nets.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Stage 8 ────────────────────────────────────────────────── -->
+  <section id="s8">
+    <h2>Stage 8 — Sign-off Checks</h2>
+    <p>
+      Before a GDS file can be submitted, three checks must pass completely. No exceptions.
+      A single DRC violation or a negative timing slack is a hard failure — the foundry
+      will reject the submission.
+    </p>
+
+    <div class="stage">
+      <div class="stage-header">
+        <span class="stage-number">STA</span>
+        <span class="stage-title">Static Timing Analysis</span>
+        <span class="stage-tool">tool: OpenSTA</span>
+      </div>
+      <p>
+        STA re-runs on the fully routed design, using <strong>extracted wire delays</strong>
+        — real resistance and capacitance values measured from the layout geometry —
+        instead of the estimated delays used during synthesis and placement. This is the
+        final authoritative check.
+      </p>
+      <p>Two types of slack must both be non-negative:</p>
+      <ul>
+        <li>
+          <strong>Setup slack</strong> — how much time the slowest path has before the
+          next clock edge captures the result. A flip-flop's input must be stable for a
+          short window before the clock edge (the setup time). If the logic is too slow,
+          the input is still changing when the edge arrives — the flip-flop captures a
+          wrong or metastable value.
+        </li>
+        <li>
+          <strong>Hold slack</strong> — the flip-flop's input must also remain stable for
+          a short window after the clock edge (the hold time). If a fast path propagates
+          new data to the input before hold time has elapsed on the receiving flip-flop,
+          the old data is corrupted. Hold violations are typically fixed by inserting small
+          delay buffers on the fast path.
+        </li>
+      </ul>
+      <p>
+        STA is run at multiple <strong>PVT corners</strong> — combinations of process
+        variation (fast, typical, or slow transistors from manufacturing variation),
+        supply voltage (nominal ±10%), and temperature (−40°C to +125°C). The worst
+        setup slack comes from the slow-voltage-hot corner; the worst hold slack comes
+        from the fast-voltage-cold corner. Both must pass.
+      </p>
+    </div>
+
+    <div class="stage">
+      <div class="stage-header">
+        <span class="stage-number">DRC</span>
+        <span class="stage-title">Design Rule Check</span>
+        <span class="stage-tool">tool: Magic</span>
+      </div>
+      <p>
+        DRC checks every polygon in the layout against the foundry's geometric
+        manufacturing rules. sky130 has hundreds of rules. Common violations:
+      </p>
+      <ul>
+        <li><strong>Metal spacing violation</strong> — two wires on the same layer are closer than the minimum allowed gap. The foundry cannot reliably manufacture them without risking a short.</li>
+        <li><strong>Minimum width violation</strong> — a wire is narrower than the minimum that can be reliably etched. It would break or have excessive resistance.</li>
+        <li><strong>Via enclosure violation</strong> — the metal surrounding a via does not extend far enough past the via boundary. The via would not make reliable contact.</li>
+      </ul>
+      <p>
+        Zero DRC violations are required. Every violation must be fixed before submission.
+        In OpenLane, DRC is run automatically with Magic after routing.
+      </p>
+    </div>
+
+    <div class="stage">
+      <div class="stage-header">
+        <span class="stage-number">LVS</span>
+        <span class="stage-title">Layout vs Schematic</span>
+        <span class="stage-tool">tool: Netgen</span>
+      </div>
+      <p>
+        LVS extracts the circuit from the physical layout — reading every transistor and
+        every wire drawn — and compares it against the gate-level netlist to verify they
+        are electrically identical.
+      </p>
+      <ul>
+        <li>Every transistor in the layout must match a transistor in the netlist.</li>
+        <li>Every wire connection in the layout must match a wire in the netlist.</li>
+        <li>No extra connections, no missing connections, no unintended shorts.</li>
+      </ul>
+      <p style="margin-bottom:0">
+        A passing LVS means that what was physically drawn is electrically the same as
+        what was synthesized. A failing LVS means the layout was modified in a way that
+        diverged from the netlist — either a routing short, a missing connection, or a
+        manual edit that was not reflected in the netlist.
+      </p>
+    </div>
+  </section>
+
+  <!-- ── Stage 9 ────────────────────────────────────────────────── -->
+  <section id="s9">
+    <h2>Stage 9 — GDS Export</h2>
+    <div class="stage">
+      <div class="stage-header">
+        <span class="stage-number">Stage 9</span>
+        <span class="stage-title">GDS Export</span>
+        <span class="stage-tool">tool: Magic</span>
+      </div>
+      <p>
+        Once STA, DRC, and LVS all pass, the layout is exported as a
+        <strong>GDSII</strong> file (<code>.gds</code>). GDSII is the universal
+        interchange format for integrated circuit layout — every foundry in the world
+        accepts it. The file encodes every polygon on every layer of the design as a
+        binary stream of geometric shapes.
+      </p>
+      <p>
+        For sky130, the GDS includes the pre-built cell layouts of every standard cell
+        instantiated in the design (merged from the PDK's own GDS files), every I/O pad,
+        and every SRAM macro. The result is the complete, self-contained physical
+        description of the chip.
+      </p>
+      <p style="margin-bottom:0">
+        The GDS is accompanied by a <code>.lef</code> (abstract layout for integration
+        into larger designs) and a <code>.lib</code> (timing model), though for a
+        standalone chip submission only the GDS is strictly required.
+      </p>
+    </div>
+  </section>
+
+  <!-- ── Stage 10 ───────────────────────────────────────────────── -->
+  <section id="s10">
+    <h2>Stage 10 — Tapeout Submission</h2>
+    <div class="stage">
+      <div class="stage-header">
+        <span class="stage-number">Stage 10</span>
+        <span class="stage-title">Submission — Efabless / Google MPW</span>
+        <span class="stage-tool">platform: efabless.com</span>
+      </div>
+      <p>
+        For sky130, tapeout happens through the <strong>Efabless Chipignite</strong> or
+        <strong>Google MPW</strong> programs. Multiple independent designs are combined
+        onto one wafer — each team gets a small die area and shares the fabrication cost.
+      </p>
+      <ol>
+        <li>Submit the GDS plus supporting files (<code>.lef</code>, <code>.lib</code>, and a caravel wrapper — a standardized harness that Efabless requires for the shared power and I/O infrastructure) to the Efabless platform.</li>
+        <li>Efabless runs their own DRC and LVS on the submission. Their checks must also pass.</li>
+        <li>Multiple teams' designs are tiled onto a single <strong>MPW wafer</strong> (Multi-Project Wafer). The cost of one wafer run is split across all submissions.</li>
+        <li>SkyWater fabricates the wafers. Typical turnaround from submission close to chips in hand: <strong>3–6 months</strong>.</li>
+        <li>Efabless dices the wafers, packages the individual dies, and ships them to each submitter.</li>
+      </ol>
+      <p style="margin-bottom:0">
+        Cost: free for the MPW slot (Google-sponsored). Each submitter receives a small
+        number of packaged chips — typically 5–10, depending on die size.
+      </p>
+    </div>
+  </section>
+
+  <!-- ── What Still Needs Doing ─────────────────────────────────── -->
+  <section id="todo">
+    <h2>What This Design Still Needs Before Tapeout</h2>
+    <p>In rough priority order. Items later in the list depend on earlier ones.</p>
+    <ul class="checklist">
+      <li>
+        <span class="check-num">1</span>
+        <div>
+          <strong>Arbiter fix</strong> — the dual-core arbiter bug on <code>main</code>
+          must be resolved and formally verified before the design is complete. DMA (when
+          added) will also be a bus master, making the arbiter even more critical.
+          See <a href="HANDOFF.html#state">HANDOFF.html — Known Issues</a>.
+        </div>
+      </li>
+      <li>
+        <span class="check-num">2</span>
+        <div>
+          <strong>sv2v clean pass</strong> — run the full RTL through sv2v and fix all
+          conversion errors. Known issues: unpacked array ports, <code>automatic</code> in
+          always blocks, <code>$readmemh</code> in <code>sram_bank.sv</code>.
+        </div>
+      </li>
+      <li>
+        <span class="check-num">3</span>
+        <div>
+          <strong>SRAM macro integration</strong> — generate an OpenRAM SRAM macro for
+          sky130 (32-bit × 16384, dual-port) and replace the BRAM inference in
+          <code>sram_bank.sv</code>. Integrate the <code>.lib</code> and <code>.lef</code>
+          into the OpenLane flow.
+        </div>
+      </li>
+      <li>
+        <span class="check-num">4</span>
+        <div>
+          <strong>PIO FIFO memory replacement</strong> — replace LUTRAM in
+          <code>pio_fifo.sv</code> with register arrays. The current FIFOs are 4 entries
+          deep — register arrays are the right choice.
+        </div>
+      </li>
+      <li>
+        <span class="check-num">5</span>
+        <div>
+          <strong>PIO clkdiv width</strong> — restore to 16 bits (currently 8 bits to
+          avoid wide counter inference in Vivado). Not a concern for Yosys/ASIC synthesis.
+        </div>
+      </li>
+      <li>
+        <span class="check-num">6</span>
+        <div>
+          <strong>DMA controller</strong> — design and verify before OpenLane work begins.
+          DMA adds a second bus master and must be formally verified alongside the arbiter.
+        </div>
+      </li>
+      <li>
+        <span class="check-num">7</span>
+        <div>
+          <strong>Crypto accelerator + secure boot</strong> (Dew) — new AHB peripheral
+          and ROM bootloader. Must be complete and passing simulation/formal verification
+          before inclusion in the tapeout RTL.
+        </div>
+      </li>
+      <li>
+        <span class="check-num">8</span>
+        <div>
+          <strong>I/O pad planning</strong> — count all required external signals (clock,
+          reset, GPIO[7:0], power, JTAG if included). Choose a die size whose perimeter
+          fits all pads. Integrate <code>sky130_fd_io</code> pad cells.
+        </div>
+      </li>
+      <li>
+        <span class="check-num">9</span>
+        <div>
+          <strong>OpenLane config</strong> — write <code>config.json</code> specifying
+          die size, target clock period, macro positions, power strap geometry, and
+          synthesis/placement/routing parameters.
+        </div>
+      </li>
+      <li>
+        <span class="check-num">10</span>
+        <div>
+          <strong>Full OpenLane run + sign-off</strong> — run the complete flow, iterate
+          on floorplan, placement, and routing until STA, DRC, and LVS all pass clean at
+          all PVT corners.
+        </div>
+      </li>
+    </ul>
+  </section>
+
+</div>
+</body>
+</html>

@@ -1,7 +1,7 @@
-#include "Vrvsoc_top.h"
-#include "Vrvsoc_top_rvsoc_top.h"
-#include "Vrvsoc_top_sram_top.h"
-#include "Vrvsoc_top_sram_bank.h"
+#include "Vrxpsm32.h"
+#include "Vrxpsm32_rxpsm32.h"
+#include "Vrxpsm32_sram_top.h"
+#include "Vrxpsm32_sram_bank.h"
 #include "verilated.h"
 #include "verilated_vcd_c.h"
 #include <cstdio>
@@ -11,7 +11,7 @@ static const uint32_t SENTINEL_ADDR  = 0x00003ffc;
 static const uint32_t SENTINEL_VALUE = 0xdeadbeef;
 static const int      MAX_CYCLES     = 2000;
 
-static void load_firmware(Vrvsoc_top *dut, const char *path) {
+static void load_firmware(Vrxpsm32 *dut, const char *path) {
     FILE *f = fopen(path, "rb");
     if (!f) {
         fprintf(stderr, "FATAL: cannot open firmware '%s'\n", path);
@@ -20,7 +20,7 @@ static void load_firmware(Vrvsoc_top *dut, const char *path) {
     uint8_t buf[4];
     int idx = 0;
     while (fread(buf, 1, 4, f) == 4) {
-        dut->rvsoc_top->mem->bank->sram[idx++] =
+        dut->rxpsm32->mem->bank->sram[idx++] =
             (uint32_t)buf[0]         |
             ((uint32_t)buf[1] <<  8) |
             ((uint32_t)buf[2] << 16) |
@@ -36,7 +36,7 @@ int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
     Verilated::traceEverOn(true);
 
-    Vrvsoc_top *dut = new Vrvsoc_top;
+    Vrxpsm32 *dut = new Vrxpsm32;
 
     load_firmware(dut, firmware);
 
@@ -47,6 +47,21 @@ int main(int argc, char **argv) {
     // Tie off PIO GPIO inputs (no external GPIO driven in simulation)
     dut->pio_gpio_in = 0;
 
+    // UART RX idle-high (no incoming data in simulation)
+    dut->uart_rx = 1;
+
+    // JTAG idle (no debugger attached in simulation)
+    dut->tck    = 0;
+    dut->trst_n = 1;
+    dut->tms    = 1;  // TMS=1 keeps TAP in Test-Logic-Reset
+    dut->tdi    = 0;
+
+    // SPI flash — no flash attached in simulation
+    dut->spi_miso = 0;
+
+    // SPI0 — no slave attached in simulation
+    dut->spi0_miso = 0;
+
     // Reset
     dut->rst_n = 0;
     dut->clk   = 0;
@@ -56,11 +71,12 @@ int main(int argc, char **argv) {
     dut->rst_n = 1;
 
     for (int cycle = 0; cycle < MAX_CYCLES; cycle++) {
+        dut->pio_gpio_in = (uint32_t)cycle;  // fast counter — new value every clock
         dut->clk = 1; dut->eval(); tfp->dump(cycle * 2 + 4);
         dut->clk = 0; dut->eval(); tfp->dump(cycle * 2 + 5);
     }
 
-    uint32_t val = dut->rvsoc_top->mem->bank->sram[0xfff];
+    uint32_t val = dut->rxpsm32->mem->bank->sram[0xfff];
     bool pass = (val == SENTINEL_VALUE);
     printf("%s: %s\n", firmware, pass ? "PASS" : "FAIL");
     if (!pass)

@@ -1,0 +1,6 @@
+openlane
+obj_dir
+obj_dir_arb
+obj_dir_dec
+rtl/core/hazard3
+

@@ -1,0 +1,6 @@
+/* KR260 (ZynqMP) bitstream packaging for fpga-manager
+   destination_device=pl is valid for ZynqMP (UltraScale+), unlike Zynq-7000 */
+all:
+{
+    [destination_device=pl] fpga_top.bit
+}

@@ -84,11 +84,10 @@ wire [11:0] reg_addr = haddr_r[11:0]; // offset within 4KB block
 // Instruction memory (32 x 16-bit, shared by all 4 SMs)
 // ============================================================================
 reg [511:0] instr_mem;
+integer i; // loop variable (module-scope for Yosys)
 
-integer mi;
 initial begin
-    for (mi = 0; mi < 32; mi = mi + 1)
-        instr_mem[mi * 16 +: 16] = 16'd0;
+    instr_mem = 512'd0;
 end
 
 // ============================================================================
@@ -342,7 +341,9 @@ endgenerate
 
 assign irq_out = irq_flags[3:0];
 
-// We combine SM irq_set/clr; handle below in sequential block
+// Combine all SM set/clr into single wires (avoids NBA last-write-wins in loop)
+wire [7:0] all_sm_irq_set = sm_irq_set[0] | sm_irq_set[1] | sm_irq_set[2] | sm_irq_set[3];
+wire [7:0] all_sm_irq_clr = sm_irq_clr[0] | sm_irq_clr[1] | sm_irq_clr[2] | sm_irq_clr[3];
 
 // ============================================================================
 // Read data mux (combinational)
@@ -392,7 +393,11 @@ always @(*) begin
         // INSTR_MEM[0..31] at 0x048..0x0C4
         default: begin
             if (reg_addr >= 12'h048 && reg_addr <= 12'h0C4) begin
-                hrdata_r = {16'd0, instr_mem[((reg_addr - 12'h048) >> 2) * 16 +: 16]};
+                begin
+                    reg [4:0] imem_idx;
+                    imem_idx = (reg_addr - 12'h048) >> 2;
+                    hrdata_r = {16'd0, instr_mem[imem_idx * 16 +: 16]};
+                end
             end else begin
                 // Per-SM registers
                 // SM0: 0x0C8, SM1: 0x0E0, SM2: 0x0F8, SM3: 0x110
@@ -408,7 +413,7 @@ end
 
 // SM register read helper function
 function automatic [31:0] sm_reg_read;
-    input integer sm;
+    input [1:0] sm;
     input [11:0]  offset;
     case (offset)
         12'h00: sm_reg_read = sm_clkdiv[sm];
@@ -448,7 +453,6 @@ end
 // Write logic (sequential, registered)
 // ============================================================================
 always @(posedge clk or negedge rst_n) begin
-    integer i;
     if (!rst_n) begin
         sm_enable_r          <= 4'd0;
         sm_restart_pulse     <= 4'd0;
@@ -470,8 +474,7 @@ always @(posedge clk or negedge rst_n) begin
             tx_wdata_r[i]   <= 32'd0;
         end
 
-        for (i = 0; i < 32; i = i + 1)
-            instr_mem[i * 16 +: 16] <= 16'd0;
+        instr_mem <= 512'd0;
 
     end else begin
         // Clear one-shot pulses each cycle
@@ -483,10 +486,8 @@ always @(posedge clk or negedge rst_n) begin
         tx_push_r[2]            <= 1'b0;
         tx_push_r[3]            <= 1'b0;
 
-        // Update IRQ flags from SM set/clr
-        for (i = 0; i < 4; i = i + 1) begin
-            irq_flags <= (irq_flags | sm_irq_set[i]) & ~sm_irq_clr[i];
-        end
+        // Update IRQ flags from SM set/clr (combined into single assignment)
+        irq_flags <= (irq_flags | all_sm_irq_set) & ~all_sm_irq_clr;
 
         // Latch FDEBUG sticky bits from SM outputs
         fdebug_txstall <= fdebug_txstall | sm_txstall_out;
@@ -525,17 +526,17 @@ always @(posedge clk or negedge rst_n) begin
                 12'h01C: begin tx_push_r[3] <= 1'b1; tx_wdata_r[3] <= hwdata; end
 
                 // -------------------------------------------------------
-                // IRQ (W1C)
+                // IRQ (W1C) — merge with SM set/clr so neither is lost
                 // -------------------------------------------------------
                 12'h030: begin
-                    irq_flags <= irq_flags & ~hwdata[7:0];
+                    irq_flags <= ((irq_flags | all_sm_irq_set) & ~all_sm_irq_clr) & ~hwdata[7:0];
                 end
 
                 // -------------------------------------------------------
-                // IRQ_FORCE (WO, force-set)
+                // IRQ_FORCE (WO, force-set) — merge with SM set/clr
                 // -------------------------------------------------------
                 12'h034: begin
-                    irq_flags <= irq_flags | hwdata[7:0];
+                    irq_flags <= ((irq_flags | all_sm_irq_set) & ~all_sm_irq_clr) | hwdata[7:0];
                 end
 
                 // -------------------------------------------------------
@@ -548,7 +549,11 @@ always @(posedge clk or negedge rst_n) begin
                 // -------------------------------------------------------
                 default: begin
                     if (reg_addr >= 12'h048 && reg_addr <= 12'h0C4) begin
-                        instr_mem[((reg_addr - 12'h048) >> 2) * 16 +: 16] <= hwdata[15:0];
+                        begin
+                            reg [4:0] wr_idx;
+                            wr_idx = (reg_addr - 12'h048) >> 2;
+                            instr_mem[wr_idx * 16 +: 16] <= hwdata[15:0];
+                        end
                     end else begin
                         // Per-SM registers
                         // SM0

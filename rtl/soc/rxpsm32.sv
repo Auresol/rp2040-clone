@@ -219,9 +219,8 @@ wire        sbus_err;
 wire [31:0] sbus_wdata;
 wire [31:0] sbus_rdata;
 
-assign sbus_rdy  = 1'b0;
-assign sbus_err  = 1'b0;
-assign sbus_rdata = 32'h0;
+// sbus_rdy, sbus_err, sbus_rdata driven by cpu0 dbg_sbus outputs —
+// no constant drivers here (would conflict with CPU output ports).
 
 // DM reset control
 wire        sys_reset_req;
@@ -437,7 +436,7 @@ localparam [XBAR_D_NS*32-1:0] XBAR_D_ADDR_MAP = {
     32'h4005_8000,  // 7: WATCHDOG
     32'h4005_0000,  // 6: TIMER
     32'h4003_C000,  // 5: SPI0
-    32'h4003_0000,  // 4: UART0
+    32'h4003_4000,  // 4: UART0
     32'h5030_0000,  // 3: PIO1
     32'h5020_0000,  // 2: PIO0
     32'h4000_0000,  // 1: GPIO

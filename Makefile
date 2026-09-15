@@ -47,8 +47,9 @@ FW_DIR    = fw
 FW_FLAGS  = -march=rv32imc_zicsr -mabi=ilp32 -nostartfiles -nostdlib \
             -T $(FW_DIR)/link.ld -I$(FW_DIR) -O1
 
-FW_TESTS  = test_c_hello test_c_pio test_c_pio_gpio blink multi_blink pio_blink pio_pwm
-FW_BINS   = $(addprefix $(SW_DIR)/, $(addsuffix .bin, $(FW_TESTS)))
+FW_TESTS  = test_c_hello test_c_pio test_c_pio_gpio
+FW_DEMOS  = blink multi_blink pio_blink pio_pwm
+FW_BINS   = $(addprefix $(SW_DIR)/, $(addsuffix .bin, $(FW_TESTS) $(FW_DEMOS)))
 
 $(SW_DIR)/%.bin: $(FW_DIR)/%.c $(FW_DIR)/crt0.S $(FW_DIR)/link.ld $(FW_DIR)/soc.h
 	$(RISCV_GCC) $(FW_FLAGS) -o $(SW_DIR)/$*.elf $(FW_DIR)/crt0.S $<
@@ -87,7 +88,7 @@ test-decoder: $(DEC_BIN)
 
 # ---------------------------------------------------------------------------
 
-.PHONY: all sim test sw clean remote-test remote-hello test-arbiter test-decoder test-uart test-spi test-i2c test-timer test-dma test-watchdog test-reset hello remote-fpga fpga-reports remote-fpga-kr260 fpga-reports-kr260 remote-bitstream-kr260 firmware-mem doc
+.PHONY: all sim test sw clean remote-test remote-hello test-arbiter test-decoder test-uart test-spi test-i2c test-timer test-dma test-watchdog test-reset hello remote-fpga fpga-reports remote-fpga-kr260 fpga-reports-kr260 remote-bitstream-kr260 firmware-mem doc openlane-prepare remote-openlane openlane-results
 
 all: sim
 
@@ -151,6 +152,9 @@ test-reset:
 doc:
 	python3 docs/gendoc.py
 
+doc-gates:
+	python3 docs/gendoc_gate.py $(ARGS)
+
 clean:
 	rm -rf obj_dir* sim_build $(SW_DIR)/*.elf $(SW_DIR)/*.bin $(SW_DIR)/*.vcd
 
@@ -163,20 +167,18 @@ REMOTE_PATH = /data/rp2040-clone
 RSYNC_EXCLUDES = \
 	--exclude='.git' \
 	--exclude='obj_dir*' \
-	--exclude='fpga/vivado' \
-	--exclude='fpga/vivado_kr260' \
-	--exclude='fpga/reports' \
-	--exclude='fpga/reports_kr260' \
-	--exclude='fpga/bitstream' \
+	--exclude='openlane' \
+	--exclude='sim_build*' \
+	--exclude='$(SW_DIR)/waveform' \
+	--exclude='fpga' \
 	--exclude='$(SW_DIR)/*.elf' \
 	--exclude='$(SW_DIR)/*.bin' \
-	--exclude='$(SW_DIR)/waveform/*.vcd' \
 	--exclude='*.log' \
 	--exclude='*.jou'
 
 remote-test:
 	rsync -av --delete $(RSYNC_EXCLUDES) . $(REMOTE_HOST):$(REMOTE_PATH)
-	ssh $(REMOTE_HOST) "cd $(REMOTE_PATH); env VERILATOR_ROOT=(verilator --getenv VERILATOR_ROOT) RISCV_GCC=(which riscv64-none-elf-gcc | get path | first) RISCV_OBJCOPY=(which riscv64-none-elf-objcopy | get path | first) make test"
+	ssh $(REMOTE_HOST) "cd $(REMOTE_PATH); rm -rf obj_dir*; env VERILATOR_ROOT=(verilator --getenv VERILATOR_ROOT) RISCV_GCC=(which riscv64-none-elf-gcc | get path | first) RISCV_OBJCOPY=(which riscv64-none-elf-objcopy | get path | first) make test"
 
 remote-hello:
 	rsync -av --delete $(RSYNC_EXCLUDES) --exclude='$(SW_DIR)/waveform' . $(REMOTE_HOST):$(REMOTE_PATH)
@@ -246,3 +248,82 @@ remote-bitstream-kr260:
 	@echo "To load on KR260:"
 	@echo "  scp $(BITSTREAM_DIR)/fpga_top.bit.bin ubuntu@<board-ip>:/lib/firmware/"
 	@echo "  ssh ubuntu@<board-ip> 'echo 0 > /sys/class/fpga_manager/fpga0/flags && echo fpga_top.bit.bin > /sys/class/fpga_manager/fpga0/firmware'"
+
+# ---------------------------------------------------------------------------
+# OpenLane RTL→GDS flow (runs on pc-nixos via Docker)
+
+OPENLANE_DIR       = openlane
+OPENLANE_SRC       = $(OPENLANE_DIR)/src
+OPENLANE_REMOTE    = /tools/OpenLane/designs/rvsoc
+OPENLANE_TAG      ?= run_01
+OPENLANE_REPORTS   = $(OPENLANE_DIR)/reports
+
+# Hazard3 source directories
+H3_HDL     = rtl/core/hazard3/hdl
+H3_LIBFPGA = rtl/core/hazard3/example_soc/libfpga
+
+# Collect all RTL into openlane/src/, apply fixes, add stubs
+openlane-prepare:
+	rm -rf $(OPENLANE_SRC)
+	mkdir -p $(OPENLANE_SRC)
+	# Hazard3 core
+	cp $(H3_HDL)/*.v                        $(OPENLANE_SRC)/
+	cp $(H3_HDL)/*.vh                       $(OPENLANE_SRC)/
+	cp $(H3_HDL)/arith/*.v                  $(OPENLANE_SRC)/
+	# Hazard3 debug (JTAG DTM + DM + CDC)
+	cp $(H3_HDL)/debug/dtm/hazard3_jtag_dtm_core.v $(OPENLANE_SRC)/
+	cp $(H3_HDL)/debug/dtm/hazard3_jtag_dtm.v      $(OPENLANE_SRC)/
+	cp $(H3_HDL)/debug/dm/hazard3_dm.v              $(OPENLANE_SRC)/
+	cp $(H3_HDL)/debug/dm/hazard3_sbus_to_ahb.v     $(OPENLANE_SRC)/
+	cp $(H3_HDL)/debug/cdc/*.v                      $(OPENLANE_SRC)/
+	# Libfpga common (onehot_mux, onehot_priority, reset_sync, etc.)
+	cp $(H3_LIBFPGA)/common/onehot_mux.v        $(OPENLANE_SRC)/
+	cp $(H3_LIBFPGA)/common/onehot_priority.v   $(OPENLANE_SRC)/
+	cp $(H3_LIBFPGA)/common/reset_sync.v        $(OPENLANE_SRC)/
+	# Libfpga busfabric (crossbar, splitter, arbiter)
+	cp $(H3_LIBFPGA)/busfabric/ahbl_crossbar.v  $(OPENLANE_SRC)/
+	cp $(H3_LIBFPGA)/busfabric/ahbl_splitter.v  $(OPENLANE_SRC)/
+	cp $(H3_LIBFPGA)/busfabric/ahbl_arbiter.v   $(OPENLANE_SRC)/
+	# Libfpga memory (cache, SRAM sync)
+	cp $(H3_LIBFPGA)/mem/ahb_cache_readonly.v       $(OPENLANE_SRC)/
+	cp $(H3_LIBFPGA)/mem/cache_mem_set_associative.v $(OPENLANE_SRC)/
+	cp $(H3_LIBFPGA)/mem/sram_sync.v                 $(OPENLANE_SRC)/
+	# Libfpga SPI XIP
+	cp $(H3_LIBFPGA)/peris/spi_03h_xip/spi_03h_xip.v      $(OPENLANE_SRC)/
+	cp $(H3_LIBFPGA)/peris/spi_03h_xip/spi_03h_xip_regs.v  $(OPENLANE_SRC)/
+	# SoC RTL
+	cp $(RTL_DIR)/soc/$(TOP).sv                    $(OPENLANE_SRC)/
+	cp $(RTL_DIR)/soc/fabric/*.sv                  $(OPENLANE_SRC)/
+	cp $(RTL_DIR)/soc/peripheral/*.sv              $(OPENLANE_SRC)/
+	cp $(RTL_DIR)/soc/peripheral/pio/*.sv          $(OPENLANE_SRC)/
+	cp $(RTL_DIR)/soc/memory/sram_top.sv           $(OPENLANE_SRC)/
+	# Apply Yosys-compatibility fixes (overwrite originals)
+	cp $(OPENLANE_DIR)/fix/pio_sm.sv.fix        $(OPENLANE_SRC)/pio_sm.sv
+	cp $(OPENLANE_DIR)/fix/pio_top.sv.fix       $(OPENLANE_SRC)/pio_top.sv
+	cp $(OPENLANE_DIR)/fix/ahbl_splitter.v.fix  $(OPENLANE_SRC)/ahbl_splitter.v
+	cp $(OPENLANE_DIR)/fix/ahbl_arbiter.v.fix   $(OPENLANE_SRC)/ahbl_arbiter.v
+	# SRAM stub (replaces real sram_bank — no LEF macro needed)
+	cp $(OPENLANE_DIR)/sram_stub.sv        $(OPENLANE_SRC)/sram_bank.sv
+	@echo "OpenLane sources ready in $(OPENLANE_SRC)/"
+
+remote-openlane: openlane-prepare
+	@rsync -a --delete --exclude='runs' $(OPENLANE_DIR)/ $(REMOTE_HOST):$(OPENLANE_REMOTE)/
+	@ssh $(REMOTE_HOST) 'docker run --rm -v /tools/OpenLane:/openlane -v /tools/OpenLane/designs:/openlane/install -v /home/auresol:/home/auresol -v /home/auresol/.ciel:/home/auresol/.ciel -e PDK_ROOT=/home/auresol/.ciel -e PDK=sky130A --user 1000:100 ghcr.io/the-openroad-project/openlane:ff5509f65b17bfa4068d5336495ab1718987ff69-amd64 bash -c "./flow.tcl -design designs/rvsoc -tag $(OPENLANE_TAG) -overwrite"'; \
+	rc=$$?; \
+	mkdir -p $(OPENLANE_DIR)/runs/$(OPENLANE_TAG); \
+	rsync -a \
+		--include='*/' \
+		--include='*.rpt' \
+		--include='*.summary.rpt' \
+		--include='*.def' \
+		--include='*.gds' \
+		--include='*.sdf' \
+		--include='*.nl.v' \
+		--include='*.spef' \
+		--include='*.log' \
+		--include='*.csv' \
+		--exclude='*' \
+		$(REMOTE_HOST):$(OPENLANE_REMOTE)/runs/$(OPENLANE_TAG)/ \
+		$(OPENLANE_DIR)/runs/$(OPENLANE_TAG)/; \
+	echo "Results synced to $(OPENLANE_DIR)/runs/$(OPENLANE_TAG)/"; \
+	exit $$rc

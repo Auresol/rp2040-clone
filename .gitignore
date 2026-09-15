@@ -10,7 +10,10 @@ fpga/reports*
 fpga/firmware.mem
 
 sim/tb/__pycache__/
-sim/tb/sim_build/
+sim/tb/sim_build*/
 sim/tb/results.xml
 
 docs/rxpsm32.html
+
+openlane/runs/
+openlane/src/

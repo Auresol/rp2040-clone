@@ -11,10 +11,27 @@
 
 // ---------------------------------------------------------------------------
 // GPIO  (0x4000_0000)
-// Single 32-bit output register — write sets pins, read returns current value.
+// SIO-style register map:
+//   0x00  IN       (RO)  — external pin state
+//   0x04  OUT      (RW)  — output value
+//   0x08  OUT_SET  (WO)  — set bits
+//   0x0C  OUT_CLR  (WO)  — clear bits
+//   0x10  OUT_XOR  (WO)  — toggle bits
+//   0x14  OE       (RW)  — output enable
+//   0x18  OE_SET   (WO)
+//   0x1C  OE_CLR   (WO)
+//   0x20  OE_XOR   (WO)
 
 #define GPIO_BASE        0x40000000u
-#define GPIO_OUT         REG(GPIO_BASE + 0x000)
+#define GPIO_IN          REG(GPIO_BASE + 0x000)
+#define GPIO_OUT         REG(GPIO_BASE + 0x004)
+#define GPIO_OUT_SET     REG(GPIO_BASE + 0x008)
+#define GPIO_OUT_CLR     REG(GPIO_BASE + 0x00C)
+#define GPIO_OUT_XOR     REG(GPIO_BASE + 0x010)
+#define GPIO_OE          REG(GPIO_BASE + 0x014)
+#define GPIO_OE_SET      REG(GPIO_BASE + 0x018)
+#define GPIO_OE_CLR      REG(GPIO_BASE + 0x01C)
+#define GPIO_OE_XOR      REG(GPIO_BASE + 0x020)
 
 // ---------------------------------------------------------------------------
 // PIO0  (0x5020_0000)

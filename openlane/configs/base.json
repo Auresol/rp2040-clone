@@ -1,11 +1,9 @@
 {
     "DESIGN_NAME": "rxpsm32",
-    "VERILOG_FILES": [
-        "dir::src/*.v",
-        "dir::src/*.sv"
-    ],
+    "VERILOG_FILES": ["dir::src/*.v", "dir::src/*.sv"],
     "CLOCK_PORT": "clk",
     "CLOCK_PERIOD": 20.0,
+
     "EXTRA_LEFS": [
         "/home/auresol/.ciel/sky130A/libs.ref/sky130_sram_macros/lef/sky130_sram_2kbyte_1rw1r_32x512_8.lef"
     ],
@@ -15,14 +13,11 @@
     "EXTRA_LIBS": [
         "/home/auresol/.ciel/sky130A/libs.ref/sky130_sram_macros/lib/sky130_sram_2kbyte_1rw1r_32x512_8_TT_1p8V_25C.lib"
     ],
+
     "VERILOG_FILES_BLACKBOX": [
         "dir::src/sky130_sram_2kbyte_1rw1r_32x512_8.bb.v"
     ],
+
     "ROUTING_CORES": 8,
-    "DIODE_INSERTION_STRATEGY": 4,
-    "FP_SIZING": "absolute",
-    "DIE_AREA": "0 0 5500 4500",
-    "PL_TARGET_DENSITY": 0.3,
-    "GRT_ADJUSTMENT": 0.3,
-    "MACRO_PLACEMENT_CFG": "dir::macro_placement.cfg"
+    "DIODE_INSERTION_STRATEGY": 4
 }

@@ -1,6 +1,7 @@
 obj_dir*/
 *.vcd
 *.fst
+sim/sw/*.bin
 sim/sw/*.elf
 sim/sw/*.hex
 sim/sw/*.o

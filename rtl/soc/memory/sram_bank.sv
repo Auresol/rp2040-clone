@@ -34,7 +34,7 @@ module sram_bank #(
     output wire        d_hexokay
 );
 
-localparam AW = 14;  // log2(16384) — update if DEPTH changes
+localparam AW = $clog2(DEPTH);
 
 (* ram_style = "block" *) reg [31:0] sram [0:DEPTH-1] /* verilator public */;
 

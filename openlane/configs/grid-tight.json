@@ -1,0 +1,8 @@
+{
+    "_description": "Original 4x8 grid layout, macros packed on left side",
+
+    "FP_SIZING": "absolute",
+    "DIE_AREA": "0 0 4500 4500",
+    "PL_TARGET_DENSITY": 0.30,
+    "MACRO_PLACEMENT_CFG": "dir::macro_placement.cfg"
+}

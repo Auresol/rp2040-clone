@@ -1,0 +1,9 @@
+{
+    "_description": "SRAM macros on top/bottom walls, logic in center",
+
+    "FP_SIZING": "absolute",
+    "DIE_AREA": "0 0 5500 4500",
+    "PL_TARGET_DENSITY": 0.30,
+    "GRT_ADJUSTMENT": 0.3,
+    "MACRO_PLACEMENT_CFG": "dir::macro_placement.cfg"
+}

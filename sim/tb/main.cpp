@@ -1,7 +1,7 @@
 #include "Vrxpsm32.h"
 #include "Vrxpsm32_rxpsm32.h"
 #include "Vrxpsm32_sram_top.h"
-#include "Vrxpsm32_sram_bank.h"
+#include "Vrxpsm32_sram_bank__D1000.h"
 #include "verilated.h"
 #include "verilated_vcd_c.h"
 #include <cstdio>
@@ -10,6 +10,31 @@
 static const uint32_t SENTINEL_ADDR  = 0x00003ffc;
 static const uint32_t SENTINEL_VALUE = 0xdeadbeef;
 static const int      MAX_CYCLES     = 2000;
+
+static const int BANK_DEPTH = 4096;  // words per bank
+
+static void write_sram(Vrxpsm32 *dut, int idx, uint32_t val) {
+    int bank = idx / BANK_DEPTH;
+    int off  = idx % BANK_DEPTH;
+    switch (bank) {
+        case 0: dut->rxpsm32->mem->gen_banks__BRA__0__KET____DOT__bank->sram[off] = val; break;
+        case 1: dut->rxpsm32->mem->gen_banks__BRA__1__KET____DOT__bank->sram[off] = val; break;
+        case 2: dut->rxpsm32->mem->gen_banks__BRA__2__KET____DOT__bank->sram[off] = val; break;
+        case 3: dut->rxpsm32->mem->gen_banks__BRA__3__KET____DOT__bank->sram[off] = val; break;
+    }
+}
+
+static uint32_t read_sram(Vrxpsm32 *dut, int idx) {
+    int bank = idx / BANK_DEPTH;
+    int off  = idx % BANK_DEPTH;
+    switch (bank) {
+        case 0: return dut->rxpsm32->mem->gen_banks__BRA__0__KET____DOT__bank->sram[off];
+        case 1: return dut->rxpsm32->mem->gen_banks__BRA__1__KET____DOT__bank->sram[off];
+        case 2: return dut->rxpsm32->mem->gen_banks__BRA__2__KET____DOT__bank->sram[off];
+        case 3: return dut->rxpsm32->mem->gen_banks__BRA__3__KET____DOT__bank->sram[off];
+        default: return 0;
+    }
+}
 
 static void load_firmware(Vrxpsm32 *dut, const char *path) {
     FILE *f = fopen(path, "rb");
@@ -20,11 +45,11 @@ static void load_firmware(Vrxpsm32 *dut, const char *path) {
     uint8_t buf[4];
     int idx = 0;
     while (fread(buf, 1, 4, f) == 4) {
-        dut->rxpsm32->mem->bank->sram[idx++] =
-            (uint32_t)buf[0]         |
-            ((uint32_t)buf[1] <<  8) |
-            ((uint32_t)buf[2] << 16) |
-            ((uint32_t)buf[3] << 24);
+        uint32_t word = (uint32_t)buf[0]         |
+                        ((uint32_t)buf[1] <<  8) |
+                        ((uint32_t)buf[2] << 16) |
+                        ((uint32_t)buf[3] << 24);
+        write_sram(dut, idx++, word);
     }
     fclose(f);
 }
@@ -76,7 +101,7 @@ int main(int argc, char **argv) {
         dut->clk = 0; dut->eval(); tfp->dump(cycle * 2 + 5);
     }
 
-    uint32_t val = dut->rxpsm32->mem->bank->sram[0xfff];
+    uint32_t val = read_sram(dut, 0xfff);
     bool pass = (val == SENTINEL_VALUE);
     printf("%s: %s\n", firmware, pass ? "PASS" : "FAIL");
     if (!pass)

@@ -254,63 +254,89 @@ remote-bitstream-kr260:
 
 OPENLANE_DIR       = openlane
 OPENLANE_SRC       = $(OPENLANE_DIR)/src
-OPENLANE_REMOTE    = /tools/OpenLane/designs/rvsoc
+OPENLANE_REMOTE_BASE = /tools/OpenLane/designs
 OPENLANE_TAG      ?= run_01
 OPENLANE_REPORTS   = $(OPENLANE_DIR)/reports
+
+# Job-based parallel runs: make remote-openlane JOB=periphery
+# Each JOB gets its own remote design dir, config overlay, and placement.
+# Configs live in openlane/configs/<job>.json + <job>.placement.cfg
+JOB               ?= grid-tight
+OPENLANE_REMOTE    = $(OPENLANE_REMOTE_BASE)/rvsoc-$(JOB)
+OPENLANE_CONFIGS   = $(OPENLANE_DIR)/configs
 
 # Hazard3 source directories
 H3_HDL     = rtl/core/hazard3/hdl
 H3_LIBFPGA = rtl/core/hazard3/example_soc/libfpga
 
-# Collect all RTL into openlane/src/, apply fixes, add stubs
+# Collect all RTL into openlane/src/, apply fixes, add stubs.
+# Idempotent: skips if .prepared sentinel exists. Use openlane-clean to force rebuild.
 openlane-prepare:
+	@if [ -f $(OPENLANE_SRC)/.prepared ]; then \
+		echo "Sources already prepared (make openlane-clean to rebuild)"; \
+	else \
+		rm -rf $(OPENLANE_SRC); \
+		mkdir -p $(OPENLANE_SRC); \
+		cp $(H3_HDL)/*.v                        $(OPENLANE_SRC)/; \
+		cp $(H3_HDL)/*.vh                       $(OPENLANE_SRC)/; \
+		cp $(H3_HDL)/arith/*.v                  $(OPENLANE_SRC)/; \
+		cp $(H3_HDL)/debug/dtm/hazard3_jtag_dtm_core.v $(OPENLANE_SRC)/; \
+		cp $(H3_HDL)/debug/dtm/hazard3_jtag_dtm.v      $(OPENLANE_SRC)/; \
+		cp $(H3_HDL)/debug/dm/hazard3_dm.v              $(OPENLANE_SRC)/; \
+		cp $(H3_HDL)/debug/dm/hazard3_sbus_to_ahb.v     $(OPENLANE_SRC)/; \
+		cp $(H3_HDL)/debug/cdc/*.v                      $(OPENLANE_SRC)/; \
+		cp $(H3_LIBFPGA)/common/onehot_mux.v        $(OPENLANE_SRC)/; \
+		cp $(H3_LIBFPGA)/common/onehot_priority.v   $(OPENLANE_SRC)/; \
+		cp $(H3_LIBFPGA)/common/reset_sync.v        $(OPENLANE_SRC)/; \
+		cp $(H3_LIBFPGA)/busfabric/ahbl_crossbar.v  $(OPENLANE_SRC)/; \
+		cp $(H3_LIBFPGA)/busfabric/ahbl_splitter.v  $(OPENLANE_SRC)/; \
+		cp $(H3_LIBFPGA)/busfabric/ahbl_arbiter.v   $(OPENLANE_SRC)/; \
+		cp $(H3_LIBFPGA)/mem/ahb_cache_readonly.v       $(OPENLANE_SRC)/; \
+		cp $(H3_LIBFPGA)/mem/cache_mem_set_associative.v $(OPENLANE_SRC)/; \
+		cp $(H3_LIBFPGA)/mem/sram_sync.v                 $(OPENLANE_SRC)/; \
+		cp $(H3_LIBFPGA)/peris/spi_03h_xip/spi_03h_xip.v      $(OPENLANE_SRC)/; \
+		cp $(H3_LIBFPGA)/peris/spi_03h_xip/spi_03h_xip_regs.v  $(OPENLANE_SRC)/; \
+		cp $(RTL_DIR)/soc/$(TOP).sv                    $(OPENLANE_SRC)/; \
+		cp $(RTL_DIR)/soc/fabric/*.sv                  $(OPENLANE_SRC)/; \
+		cp $(RTL_DIR)/soc/peripheral/*.sv              $(OPENLANE_SRC)/; \
+		cp $(RTL_DIR)/soc/peripheral/pio/*.sv          $(OPENLANE_SRC)/; \
+		cp $(RTL_DIR)/soc/memory/sram_top.sv           $(OPENLANE_SRC)/; \
+		cp $(OPENLANE_DIR)/fix/pio_sm.sv.fix        $(OPENLANE_SRC)/pio_sm.sv; \
+		cp $(OPENLANE_DIR)/fix/pio_top.sv.fix       $(OPENLANE_SRC)/pio_top.sv; \
+		cp $(OPENLANE_DIR)/fix/ahbl_splitter.v.fix  $(OPENLANE_SRC)/ahbl_splitter.v; \
+		cp $(OPENLANE_DIR)/fix/ahbl_arbiter.v.fix   $(OPENLANE_SRC)/ahbl_arbiter.v; \
+		cp $(RTL_DIR)/soc/memory/sram_bank_sky130.sv  $(OPENLANE_SRC)/sram_bank.sv; \
+		cp $(OPENLANE_DIR)/sky130_sram_2kbyte_1rw1r_32x512_8.bb.v $(OPENLANE_SRC)/; \
+		touch $(OPENLANE_SRC)/.prepared; \
+		echo "OpenLane sources ready in $(OPENLANE_SRC)/"; \
+	fi
+
+openlane-clean:
 	rm -rf $(OPENLANE_SRC)
-	mkdir -p $(OPENLANE_SRC)
-	# Hazard3 core
-	cp $(H3_HDL)/*.v                        $(OPENLANE_SRC)/
-	cp $(H3_HDL)/*.vh                       $(OPENLANE_SRC)/
-	cp $(H3_HDL)/arith/*.v                  $(OPENLANE_SRC)/
-	# Hazard3 debug (JTAG DTM + DM + CDC)
-	cp $(H3_HDL)/debug/dtm/hazard3_jtag_dtm_core.v $(OPENLANE_SRC)/
-	cp $(H3_HDL)/debug/dtm/hazard3_jtag_dtm.v      $(OPENLANE_SRC)/
-	cp $(H3_HDL)/debug/dm/hazard3_dm.v              $(OPENLANE_SRC)/
-	cp $(H3_HDL)/debug/dm/hazard3_sbus_to_ahb.v     $(OPENLANE_SRC)/
-	cp $(H3_HDL)/debug/cdc/*.v                      $(OPENLANE_SRC)/
-	# Libfpga common (onehot_mux, onehot_priority, reset_sync, etc.)
-	cp $(H3_LIBFPGA)/common/onehot_mux.v        $(OPENLANE_SRC)/
-	cp $(H3_LIBFPGA)/common/onehot_priority.v   $(OPENLANE_SRC)/
-	cp $(H3_LIBFPGA)/common/reset_sync.v        $(OPENLANE_SRC)/
-	# Libfpga busfabric (crossbar, splitter, arbiter)
-	cp $(H3_LIBFPGA)/busfabric/ahbl_crossbar.v  $(OPENLANE_SRC)/
-	cp $(H3_LIBFPGA)/busfabric/ahbl_splitter.v  $(OPENLANE_SRC)/
-	cp $(H3_LIBFPGA)/busfabric/ahbl_arbiter.v   $(OPENLANE_SRC)/
-	# Libfpga memory (cache, SRAM sync)
-	cp $(H3_LIBFPGA)/mem/ahb_cache_readonly.v       $(OPENLANE_SRC)/
-	cp $(H3_LIBFPGA)/mem/cache_mem_set_associative.v $(OPENLANE_SRC)/
-	cp $(H3_LIBFPGA)/mem/sram_sync.v                 $(OPENLANE_SRC)/
-	# Libfpga SPI XIP
-	cp $(H3_LIBFPGA)/peris/spi_03h_xip/spi_03h_xip.v      $(OPENLANE_SRC)/
-	cp $(H3_LIBFPGA)/peris/spi_03h_xip/spi_03h_xip_regs.v  $(OPENLANE_SRC)/
-	# SoC RTL
-	cp $(RTL_DIR)/soc/$(TOP).sv                    $(OPENLANE_SRC)/
-	cp $(RTL_DIR)/soc/fabric/*.sv                  $(OPENLANE_SRC)/
-	cp $(RTL_DIR)/soc/peripheral/*.sv              $(OPENLANE_SRC)/
-	cp $(RTL_DIR)/soc/peripheral/pio/*.sv          $(OPENLANE_SRC)/
-	cp $(RTL_DIR)/soc/memory/sram_top.sv           $(OPENLANE_SRC)/
-	# Apply Yosys-compatibility fixes (overwrite originals)
-	cp $(OPENLANE_DIR)/fix/pio_sm.sv.fix        $(OPENLANE_SRC)/pio_sm.sv
-	cp $(OPENLANE_DIR)/fix/pio_top.sv.fix       $(OPENLANE_SRC)/pio_top.sv
-	cp $(OPENLANE_DIR)/fix/ahbl_splitter.v.fix  $(OPENLANE_SRC)/ahbl_splitter.v
-	cp $(OPENLANE_DIR)/fix/ahbl_arbiter.v.fix   $(OPENLANE_SRC)/ahbl_arbiter.v
-	# SRAM stub (replaces real sram_bank — no LEF macro needed)
-	cp $(OPENLANE_DIR)/sram_stub.sv        $(OPENLANE_SRC)/sram_bank.sv
-	@echo "OpenLane sources ready in $(OPENLANE_SRC)/"
 
 remote-openlane: openlane-prepare
-	@rsync -a --delete --exclude='runs' $(OPENLANE_DIR)/ $(REMOTE_HOST):$(OPENLANE_REMOTE)/
-	@ssh $(REMOTE_HOST) 'docker run --rm -v /tools/OpenLane:/openlane -v /tools/OpenLane/designs:/openlane/install -v /home/auresol:/home/auresol -v /home/auresol/.ciel:/home/auresol/.ciel -e PDK_ROOT=/home/auresol/.ciel -e PDK=sky130A --user 1000:100 ghcr.io/the-openroad-project/openlane:ff5509f65b17bfa4068d5336495ab1718987ff69-amd64 bash -c "./flow.tcl -design designs/rvsoc -tag $(OPENLANE_TAG) -overwrite"'; \
+	@test -f $(OPENLANE_CONFIGS)/$(JOB).json || { echo "ERROR: $(OPENLANE_CONFIGS)/$(JOB).json not found"; exit 1; }
+	@echo "==> Launching job '$(JOB)' tag '$(OPENLANE_TAG)' on $(REMOTE_HOST)"
+	@# Generate per-job config and placement into temp files (parallel-safe)
+	@python3 $(OPENLANE_DIR)/merge_config.py \
+		$(OPENLANE_CONFIGS)/base.json \
+		$(OPENLANE_CONFIGS)/$(JOB).json \
+		/tmp/openlane-$(JOB)-config.json
+	@if [ -f $(OPENLANE_CONFIGS)/$(JOB).placement.cfg ]; then \
+		cp $(OPENLANE_CONFIGS)/$(JOB).placement.cfg /tmp/openlane-$(JOB)-placement.cfg; \
+	fi
+	@# Sync shared RTL (src/ is read-only after prepare, safe for parallel reads)
+	@ssh $(REMOTE_HOST) "mkdir $(OPENLANE_REMOTE)/src"
+	@rsync -a $(OPENLANE_SRC)/ $(REMOTE_HOST):$(OPENLANE_REMOTE)/src/
+	@# Sync per-job config and placement
+	@scp /tmp/openlane-$(JOB)-config.json $(REMOTE_HOST):$(OPENLANE_REMOTE)/config.json
+	@if [ -f /tmp/openlane-$(JOB)-placement.cfg ]; then \
+		scp /tmp/openlane-$(JOB)-placement.cfg $(REMOTE_HOST):$(OPENLANE_REMOTE)/macro_placement.cfg; \
+	fi
+	@# Run OpenLane
+	@ssh $(REMOTE_HOST) 'docker run --rm -v /tools/OpenLane:/openlane -v /tools/OpenLane/designs:/openlane/install -v /home/auresol:/home/auresol -v /home/auresol/.ciel:/home/auresol/.ciel -e PDK_ROOT=/home/auresol/.ciel -e PDK=sky130A --user 1000:100 ghcr.io/the-openroad-project/openlane:ff5509f65b17bfa4068d5336495ab1718987ff69-amd64 bash -c "./flow.tcl -design designs/rvsoc-$(JOB) -tag $(OPENLANE_TAG) -overwrite"'; \
 	rc=$$?; \
-	mkdir -p $(OPENLANE_DIR)/runs/$(OPENLANE_TAG); \
+	mkdir -p $(OPENLANE_DIR)/runs/$(JOB)-$(OPENLANE_TAG); \
 	rsync -a \
 		--include='*/' \
 		--include='*.rpt' \
@@ -324,6 +350,7 @@ remote-openlane: openlane-prepare
 		--include='*.csv' \
 		--exclude='*' \
 		$(REMOTE_HOST):$(OPENLANE_REMOTE)/runs/$(OPENLANE_TAG)/ \
-		$(OPENLANE_DIR)/runs/$(OPENLANE_TAG)/; \
-	echo "Results synced to $(OPENLANE_DIR)/runs/$(OPENLANE_TAG)/"; \
+		$(OPENLANE_DIR)/runs/$(JOB)-$(OPENLANE_TAG)/; \
+	echo "Results synced to $(OPENLANE_DIR)/runs/$(JOB)-$(OPENLANE_TAG)/"; \
+	rm -f /tmp/openlane-$(JOB)-config.json /tmp/openlane-$(JOB)-placement.cfg; \
 	exit $$rc

@@ -7,15 +7,18 @@
 //                   CPU1-I ┘→ i_xbar (2×2) → ─┤
 //                                              └ XIP flash (via cache)
 //
-// Data port:        CPU0-D ┐→ d_xbar (2×11) → SRAM D port + peripherals + SIO
+// Data port:        CPU0-D ┐→ d_xbar (2×14) → 4×SRAM bank + peripherals + SIO
 //                   CPU1-D ┘
 //
 // Address map (instruction port):
-//   0x0000_0000 – 0x0000_FFFF  →  SRAM I port (64 KB)
+//   0x0000_0000 – 0x0000_FFFF  →  SRAM I port (64 KB, internally banked)
 //   0x1000_0000 – 0x1FFF_FFFF  →  XIP flash (via cache → SPI 03h)
 //
 // Address map (data port):
-//   0x0000_0000 – 0x0000_FFFF  →  SRAM     (64 KB)
+//   0x0000_0000 – 0x0000_3FFF  →  SRAM bank 0 (16 KB)
+//   0x0000_4000 – 0x0000_7FFF  →  SRAM bank 1 (16 KB)
+//   0x0000_8000 – 0x0000_BFFF  →  SRAM bank 2 (16 KB)
+//   0x0000_C000 – 0x0000_FFFF  →  SRAM bank 3 (16 KB)
 //   0x4000_0000 – 0x4000_FFFF  →  GPIO     (SIO-style: IN/OUT/OE + SET/CLR/XOR)
 //   0x4003_0000 – 0x4003_3FFF  →  UART0    (PL011-compatible)
 //   0x4003_C000 – 0x4003_FFFF  →  SPI0     (PL022-compatible)
@@ -125,11 +128,29 @@ wire [2:0]  ixbar_xip_hsize;
 // ============================================================================
 // Decoder → peripheral wires (same as before)
 
-wire [31:0] dec_sram_haddr,  dec_sram_hwdata,  dec_sram_hrdata;
-wire        dec_sram_hwrite, dec_sram_hready,  dec_sram_hresp;
-wire [1:0]  dec_sram_htrans;
-wire [2:0]  dec_sram_hsize;
-wire        dec_sram_hexokay;
+wire [31:0] dec_sram0_haddr,  dec_sram0_hwdata,  dec_sram0_hrdata;
+wire        dec_sram0_hwrite, dec_sram0_hready,  dec_sram0_hresp;
+wire [1:0]  dec_sram0_htrans;
+wire [2:0]  dec_sram0_hsize;
+wire        dec_sram0_hexokay;
+
+wire [31:0] dec_sram1_haddr,  dec_sram1_hwdata,  dec_sram1_hrdata;
+wire        dec_sram1_hwrite, dec_sram1_hready,  dec_sram1_hresp;
+wire [1:0]  dec_sram1_htrans;
+wire [2:0]  dec_sram1_hsize;
+wire        dec_sram1_hexokay;
+
+wire [31:0] dec_sram2_haddr,  dec_sram2_hwdata,  dec_sram2_hrdata;
+wire        dec_sram2_hwrite, dec_sram2_hready,  dec_sram2_hresp;
+wire [1:0]  dec_sram2_htrans;
+wire [2:0]  dec_sram2_hsize;
+wire        dec_sram2_hexokay;
+
+wire [31:0] dec_sram3_haddr,  dec_sram3_hwdata,  dec_sram3_hrdata;
+wire        dec_sram3_hwrite, dec_sram3_hready,  dec_sram3_hresp;
+wire [1:0]  dec_sram3_htrans;
+wire [2:0]  dec_sram3_hsize;
+wire        dec_sram3_hexokay;
 
 wire [31:0] dec_gpio_haddr,  dec_gpio_hwdata,  dec_gpio_hrdata;
 wire        dec_gpio_hwrite, dec_gpio_hready,  dec_gpio_hresp;
@@ -590,43 +611,52 @@ assign xbar_i_dst_hresp       = {ixbar_xip_hresp,   ixbar_sram_hresp};
 assign xbar_i_dst_hrdata      = {ixbar_xip_hrdata,  ixbar_sram_hrdata};
 
 // ============================================================================
-// Data-port crossbar: 2 masters (CPU0-D, CPU1-D) → 11 slaves.
+// Data-port crossbar: 2 masters (CPU0-D, CPU1-D) → 14 slaves.
+// Each SRAM bank is a separate crossbar slave so that both cores
+// can access different banks simultaneously without contention.
 
 localparam XBAR_D_NM = 2;   // masters: CPU0-D, CPU1-D
-localparam XBAR_D_NS = 11;  // slaves (10 original + SIO)
+localparam XBAR_D_NS = 14;  // slaves: 4 SRAM banks + 9 peripherals + SIO
 
 // Slave indices (must match ADDR_MAP packing order)
-localparam S_SRAM = 0, S_GPIO = 1, S_PIO0 = 2, S_PIO1 = 3, S_UART0 = 4,
-           S_SPI0 = 5, S_TIMER = 6, S_WDOG = 7, S_RSTC = 8, S_SYSINFO = 9,
-           S_SIO = 10;
+localparam S_SRAM0 = 0, S_SRAM1 = 1, S_SRAM2 = 2, S_SRAM3 = 3,
+           S_GPIO  = 4, S_PIO0  = 5, S_PIO1  = 6, S_UART0 = 7,
+           S_SPI0  = 8, S_TIMER = 9, S_WDOG  = 10, S_RSTC  = 11,
+           S_SYSINFO = 12, S_SIO = 13;
 
 // Address map: (addr ^ MAP[i]) & MASK[i] == 0 → slave i
-// Packed MSB-first: {slave10, slave9, ..., slave0}
+// Packed MSB-first: {slave13, slave12, ..., slave0}
 localparam [XBAR_D_NS*32-1:0] XBAR_D_ADDR_MAP = {
-    32'hD000_0000,  // 10: SIO
-    32'h4005_C000,  //  9: SYSINFO
-    32'h4005_4000,  //  8: RESET
-    32'h4005_8000,  //  7: WATCHDOG
-    32'h4005_0000,  //  6: TIMER
-    32'h4003_C000,  //  5: SPI0
-    32'h4003_4000,  //  4: UART0
-    32'h5030_0000,  //  3: PIO1
-    32'h5020_0000,  //  2: PIO0
-    32'h4000_0000,  //  1: GPIO
-    32'h0000_0000   //  0: SRAM
+    32'hD000_0000,  // 13: SIO
+    32'h4005_C000,  // 12: SYSINFO
+    32'h4005_4000,  // 11: RESET
+    32'h4005_8000,  // 10: WATCHDOG
+    32'h4005_0000,  //  9: TIMER
+    32'h4003_C000,  //  8: SPI0
+    32'h4003_4000,  //  7: UART0
+    32'h5030_0000,  //  6: PIO1
+    32'h5020_0000,  //  5: PIO0
+    32'h4000_0000,  //  4: GPIO
+    32'h0000_C000,  //  3: SRAM bank 3
+    32'h0000_8000,  //  2: SRAM bank 2
+    32'h0000_4000,  //  1: SRAM bank 1
+    32'h0000_0000   //  0: SRAM bank 0
 };
 localparam [XBAR_D_NS*32-1:0] XBAR_D_ADDR_MASK = {
-    32'hF000_F000,  // 10: SIO     (4 KB)
-    32'hFFFF_C000,  //  9: SYSINFO (16 KB)
-    32'hFFFF_C000,  //  8: RESET   (16 KB)
-    32'hFFFF_C000,  //  7: WATCHDOG(16 KB)
-    32'hFFFF_C000,  //  6: TIMER   (16 KB)
-    32'hFFFF_C000,  //  5: SPI0    (16 KB)
-    32'hFFFF_C000,  //  4: UART0   (16 KB)
-    32'hFFF0_0000,  //  3: PIO1    (1 MB)
-    32'hFFF0_0000,  //  2: PIO0    (1 MB)
-    32'hFFFF_0000,  //  1: GPIO    (64 KB)
-    32'hFFFF_0000   //  0: SRAM    (64 KB)
+    32'hF000_F000,  // 13: SIO      (4 KB)
+    32'hFFFF_C000,  // 12: SYSINFO  (16 KB)
+    32'hFFFF_C000,  // 11: RESET    (16 KB)
+    32'hFFFF_C000,  // 10: WATCHDOG (16 KB)
+    32'hFFFF_C000,  //  9: TIMER    (16 KB)
+    32'hFFFF_C000,  //  8: SPI0     (16 KB)
+    32'hFFFF_C000,  //  7: UART0    (16 KB)
+    32'hFFF0_0000,  //  6: PIO1     (1 MB)
+    32'hFFF0_0000,  //  5: PIO0     (1 MB)
+    32'hFFFF_0000,  //  4: GPIO     (64 KB)
+    32'hFFFF_C000,  //  3: SRAM bank 3 (16 KB)
+    32'hFFFF_C000,  //  2: SRAM bank 2 (16 KB)
+    32'hFFFF_C000,  //  1: SRAM bank 1 (16 KB)
+    32'hFFFF_C000   //  0: SRAM bank 0 (16 KB)
 };
 
 // Crossbar slave-side packed buses
@@ -688,7 +718,10 @@ ahbl_crossbar_strict #(
     assign PFX``_hsize  = xbar_d_dst_hsize [IDX*3  +: 3];  \
     assign PFX``_hwdata = xbar_d_dst_hwdata[IDX*32 +: 32];
 
-`XBAR_UNPACK_SLAVE(S_SRAM,    dec_sram)
+`XBAR_UNPACK_SLAVE(S_SRAM0,   dec_sram0)
+`XBAR_UNPACK_SLAVE(S_SRAM1,   dec_sram1)
+`XBAR_UNPACK_SLAVE(S_SRAM2,   dec_sram2)
+`XBAR_UNPACK_SLAVE(S_SRAM3,   dec_sram3)
 `XBAR_UNPACK_SLAVE(S_GPIO,    dec_gpio)
 `XBAR_UNPACK_SLAVE(S_PIO0,    dec_pio0)
 `XBAR_UNPACK_SLAVE(S_PIO1,    dec_pio1)
@@ -707,19 +740,22 @@ assign xbar_d_dst_hrdata = {
     dec_sio_hrdata,
     dec_sysinfo_hrdata, dec_rstc_hrdata,  dec_wdog_hrdata,  dec_timer_hrdata,
     dec_spi0_hrdata,    dec_uart0_hrdata, dec_pio1_hrdata,  dec_pio0_hrdata,
-    dec_gpio_hrdata,    dec_sram_hrdata
+    dec_gpio_hrdata,
+    dec_sram3_hrdata,   dec_sram2_hrdata, dec_sram1_hrdata, dec_sram0_hrdata
 };
 assign xbar_d_dst_hready_resp = {
     dec_sio_hready,
     dec_sysinfo_hready, dec_rstc_hready,  dec_wdog_hready,  dec_timer_hready,
     dec_spi0_hready,    dec_uart0_hready, dec_pio1_hready,  dec_pio0_hready,
-    dec_gpio_hready,    dec_sram_hready
+    dec_gpio_hready,
+    dec_sram3_hready,   dec_sram2_hready, dec_sram1_hready, dec_sram0_hready
 };
 assign xbar_d_dst_hresp = {
     dec_sio_hresp,
     dec_sysinfo_hresp, dec_rstc_hresp,  dec_wdog_hresp,  dec_timer_hresp,
     dec_spi0_hresp,    dec_uart0_hresp, dec_pio1_hresp,  dec_pio0_hresp,
-    dec_gpio_hresp,    dec_sram_hresp
+    dec_gpio_hresp,
+    dec_sram3_hresp,   dec_sram2_hresp, dec_sram1_hresp, dec_sram0_hresp
 };
 
 // ============================================================================
@@ -801,24 +837,63 @@ spi_03h_xip xip_spi (
 );
 
 // ============================================================================
-// Shared SRAM (64 KB)
+// Shared SRAM (64 KB = 4 × 16 KB banks)
+// I-port: single entry via I-port crossbar, internally banked
+// D-port: per-bank crossbar slaves for zero-contention dual-core access
 
 sram_top mem (
-    .clk       (clk),
-    .i_haddr   (ixbar_sram_haddr),
-    .i_htrans  (ixbar_sram_htrans),
-    .i_hrdata  (ixbar_sram_hrdata),
-    .i_hready  (ixbar_sram_hready),
-    .i_hresp   (ixbar_sram_hresp),
-    .d_haddr   (dec_sram_haddr),
-    .d_hwrite  (dec_sram_hwrite),
-    .d_htrans  (dec_sram_htrans),
-    .d_hsize   (dec_sram_hsize),
-    .d_hwdata  (dec_sram_hwdata),
-    .d_hrdata  (dec_sram_hrdata),
-    .d_hready  (dec_sram_hready),
-    .d_hresp   (dec_sram_hresp),
-    .d_hexokay (dec_sram_hexokay)
+    .clk        (clk),
+
+    // I-port (single, internally muxed)
+    .i_haddr    (ixbar_sram_haddr),
+    .i_htrans   (ixbar_sram_htrans),
+    .i_hrdata   (ixbar_sram_hrdata),
+    .i_hready   (ixbar_sram_hready),
+    .i_hresp    (ixbar_sram_hresp),
+
+    // D-port bank 0 (from crossbar S_SRAM0)
+    .d0_haddr   (dec_sram0_haddr),
+    .d0_hwrite  (dec_sram0_hwrite),
+    .d0_htrans  (dec_sram0_htrans),
+    .d0_hsize   (dec_sram0_hsize),
+    .d0_hwdata  (dec_sram0_hwdata),
+    .d0_hrdata  (dec_sram0_hrdata),
+    .d0_hready  (dec_sram0_hready),
+    .d0_hresp   (dec_sram0_hresp),
+    .d0_hexokay (dec_sram0_hexokay),
+
+    // D-port bank 1 (from crossbar S_SRAM1)
+    .d1_haddr   (dec_sram1_haddr),
+    .d1_hwrite  (dec_sram1_hwrite),
+    .d1_htrans  (dec_sram1_htrans),
+    .d1_hsize   (dec_sram1_hsize),
+    .d1_hwdata  (dec_sram1_hwdata),
+    .d1_hrdata  (dec_sram1_hrdata),
+    .d1_hready  (dec_sram1_hready),
+    .d1_hresp   (dec_sram1_hresp),
+    .d1_hexokay (dec_sram1_hexokay),
+
+    // D-port bank 2 (from crossbar S_SRAM2)
+    .d2_haddr   (dec_sram2_haddr),
+    .d2_hwrite  (dec_sram2_hwrite),
+    .d2_htrans  (dec_sram2_htrans),
+    .d2_hsize   (dec_sram2_hsize),
+    .d2_hwdata  (dec_sram2_hwdata),
+    .d2_hrdata  (dec_sram2_hrdata),
+    .d2_hready  (dec_sram2_hready),
+    .d2_hresp   (dec_sram2_hresp),
+    .d2_hexokay (dec_sram2_hexokay),
+
+    // D-port bank 3 (from crossbar S_SRAM3)
+    .d3_haddr   (dec_sram3_haddr),
+    .d3_hwrite  (dec_sram3_hwrite),
+    .d3_htrans  (dec_sram3_htrans),
+    .d3_hsize   (dec_sram3_hsize),
+    .d3_hwdata  (dec_sram3_hwdata),
+    .d3_hrdata  (dec_sram3_hrdata),
+    .d3_hready  (dec_sram3_hready),
+    .d3_hresp   (dec_sram3_hresp),
+    .d3_hexokay (dec_sram3_hexokay)
 );
 
 // ============================================================================

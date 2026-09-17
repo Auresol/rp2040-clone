@@ -22,9 +22,9 @@
 // ---------------------------------------------------------------------------
 // Stack layout — one core, 4 KB region growing downward:
 //
-//   Core 0: 0xEFFC+1 .. 0xFFFC   (sp starts at 0xFFFC)
+//   Core 0: 0x6FFC+1 .. 0x7FFC   (sp starts at 0x7FFC)
 
-#define CORE0_STACK_TOP  0x0000FFFC
+#define CORE0_STACK_TOP  0x00007FFC
 
 .section .text.crt0
 .global _start

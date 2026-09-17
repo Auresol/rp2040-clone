@@ -1,9 +1,0 @@
-{
-    "_description": "Dual-core: banks 0,1 top wall + banks 2,3 bottom wall, logic in middle",
-
-    "FP_SIZING": "absolute",
-    "DIE_AREA": "0 0 6200 5600",
-    "PL_TARGET_DENSITY": 0.25,
-    "GRT_ADJUSTMENT": 0.45,
-    "MACRO_PLACEMENT_CFG": "dir::macro_placement.cfg"
-}

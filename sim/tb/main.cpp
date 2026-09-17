@@ -19,8 +19,6 @@ static void write_sram(Vrxpsm32 *dut, int idx, uint32_t val) {
     switch (bank) {
         case 0: dut->rxpsm32->mem->gen_banks__BRA__0__KET____DOT__bank->sram[off] = val; break;
         case 1: dut->rxpsm32->mem->gen_banks__BRA__1__KET____DOT__bank->sram[off] = val; break;
-        case 2: dut->rxpsm32->mem->gen_banks__BRA__2__KET____DOT__bank->sram[off] = val; break;
-        case 3: dut->rxpsm32->mem->gen_banks__BRA__3__KET____DOT__bank->sram[off] = val; break;
     }
 }
 
@@ -30,8 +28,6 @@ static uint32_t read_sram(Vrxpsm32 *dut, int idx) {
     switch (bank) {
         case 0: return dut->rxpsm32->mem->gen_banks__BRA__0__KET____DOT__bank->sram[off];
         case 1: return dut->rxpsm32->mem->gen_banks__BRA__1__KET____DOT__bank->sram[off];
-        case 2: return dut->rxpsm32->mem->gen_banks__BRA__2__KET____DOT__bank->sram[off];
-        case 3: return dut->rxpsm32->mem->gen_banks__BRA__3__KET____DOT__bank->sram[off];
         default: return 0;
     }
 }

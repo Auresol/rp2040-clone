@@ -1,0 +1,9 @@
+{
+    "_description": "Openframe: bank 0 top wall + bank 1 bottom wall (4x2 each)",
+
+    "FP_SIZING": "absolute",
+    "DIE_AREA": "0 0 3167 4767",
+    "PL_TARGET_DENSITY": 0.35,
+    "GRT_ADJUSTMENT": 0.45,
+    "MACRO_PLACEMENT_CFG": "dir::macro_placement.cfg"
+}

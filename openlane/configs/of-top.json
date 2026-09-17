@@ -1,0 +1,9 @@
+{
+    "_description": "Openframe: 16 SRAM macros on top wall (4x4), logic below",
+
+    "FP_SIZING": "absolute",
+    "DIE_AREA": "0 0 3167 4767",
+    "PL_TARGET_DENSITY": 0.35,
+    "GRT_ADJUSTMENT": 0.45,
+    "MACRO_PLACEMENT_CFG": "dir::macro_placement.cfg"
+}

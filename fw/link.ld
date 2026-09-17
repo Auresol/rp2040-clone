@@ -1,5 +1,5 @@
 /*
- * Linker script for rvsoc — single 64KB SRAM at 0x00000000.
+ * Linker script for rvsoc — 32KB SRAM at 0x00000000 (2 × 16KB banks).
  *
  * Memory layout (low → high):
  *   0x0000_0000  .text       code (crt0 first, then everything else)
@@ -12,12 +12,12 @@
  *   0x0000_3FF8  TEST_SENTINEL_EXTRA (spare)
  *   0x0000_3FFC  TEST_SENTINEL  (sim checks 0xdeadbeef here for PASS)
  *
- *   0x0000_EFFC  core 1 stack top (grows down, 4 KB)
- *   0x0000_FFFC  core 0 stack top (grows down, 4 KB)
+ *   0x0000_6FFC  core 1 stack top (grows down, 4 KB)
+ *   0x0000_7FFC  core 0 stack top (grows down, 4 KB)
  */
 
 MEMORY {
-    SRAM (rwx) : ORIGIN = 0x00000000, LENGTH = 64K
+    SRAM (rwx) : ORIGIN = 0x00000000, LENGTH = 32K
 }
 
 SECTIONS {
